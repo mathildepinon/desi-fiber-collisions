@@ -1,14 +1,16 @@
 import os
 import time
 import sys
+import argparse
 
 import numpy as np
 from matplotlib import pyplot as plt
 
 from mockfactory import Catalog, utils
 from cosmoprimo import fiducial
-from pypower import CatalogFFTPower, CatalogSmoothWindow, setup_logging
-from pycorr import TwoPointCounter
+from pypower import CatalogFFTPower, CatalogSmoothWindow, PowerSpectrumSmoothWindow, PowerSpectrumSmoothWindowMatrix, setup_logging
+from pycorr import TwoPointCounter, TwoPointCorrelationFunction
+
 
     
 def select_region(region, catalog, zrange=None):
@@ -24,6 +26,29 @@ def select_region(region, catalog, zrange=None):
 def get_rdd(catalog, cosmo=fiducial.DESI()):
     ra, dec, z = catalog['RA'], catalog['DEC'], catalog['Z']
     return [ra, dec, cosmo.comoving_radial_distance(z)]
+
+
+def select_data(imock=0, tracer='ELG', region='NGC', completeness='', zrange=None):
+    catalog_dir = '/global/cfs/cdirs/desi/survey/catalogs/main/mocks/FirstGenMocks/AbacusSummit/Y1v1/mock{:d}/LSScats'.format(imock)
+    data_N_fn = os.path.join(catalog_dir, '{}_{}N_clustering.dat.fits'.format(tracer, completeness))
+    data_S_fn = os.path.join(catalog_dir, '{}_{}S_clustering.dat.fits'.format(tracer, completeness))
+    randoms_N_fn = os.path.join(catalog_dir, '{}_{}N_0_clustering.ran.fits'.format(tracer, completeness))
+    randoms_S_fn = os.path.join(catalog_dir, '{}_{}S_0_clustering.ran.fits'.format(tracer, completeness))
+    
+    data = {'N': Catalog.read(data_N_fn), 'S': Catalog.read(data_S_fn)}
+    randoms = {'N': Catalog.read(randoms_N_fn), 'S': Catalog.read(randoms_S_fn)}
+    
+    data_selected = {key: select_region(region, val, zrange) for (key, val) in data.items()}
+    randoms_selected = {key: select_region(region, val, zrange) for (key, val) in randoms.items()}
+    
+    if region=='NGC':
+        for key in randoms_selected.keys():
+            randoms_selected[key]['WEIGHT'] = randoms_selected[key]['WEIGHT']*data_selected[key]['WEIGHT'].csum()/randoms_selected[key]['WEIGHT'].csum()
+
+    data_toret = Catalog.concatenate([data_selected[key] for key in data_selected.keys()])
+    randoms_toret = Catalog.concatenate([randoms_selected[key] for key in randoms_selected.keys()])
+    
+    return data_toret, randoms_toret
 
 
 def compute_power(data, randoms, edges, output_name, ells=(0, 2, 4), los='firstpoint', boxpad=1.5, cellsize=6, resampler='tsc'):
@@ -121,7 +146,7 @@ def plot_comparison(nmocks, ells, galaxy_type):
             
     axes[0][0].plot([], [], ls='-', label='Complete', color='black')
     axes[0][0].plot([], [], ls=':', label='Fiber assigned', color='black')
-    axes[1][0].set_ylabel(r'$k \Delta P(k)/$ [$(\mathrm{Mpc}/h)^{3}$]')
+    axes[1][0].set_ylabel(r'$k \Delta P(k)/$ [$(\mathrm{Mpc}/h)^{2}$]')
     axes[1][0].set_xlabel(r'$k$  [$h$/Mpc]')
     axes[1][1].set_xlabel(r'$k$  [$h$/Mpc]')
     axes[0][0].legend()
@@ -131,80 +156,76 @@ def plot_comparison(nmocks, ells, galaxy_type):
 def main():
     setup_logging()
     
-    # Data
-    imock = int(sys.argv[1])
-    galaxy_type = "ELG"
-    completeness = 'complete_'
-    
-    # NORTH
-    data_N_fn = "/global/cfs/cdirs/desi/survey/catalogs/main/mocks/FirstGenMocks/AbacusSummit/Y1v1/mock{:d}/LSScats/{}_{}N_clustering.dat.fits".format(imock, galaxy_type, completeness)
-    randoms_N_fn = "/global/cfs/cdirs/desi/survey/catalogs/main/mocks/FirstGenMocks/AbacusSummit/Y1v1/mock{:d}/LSScats/{}_{}N_0_clustering.ran.fits".format(imock, galaxy_type, completeness)
-    data_N = Catalog.read(data_N_fn, filetype='fits')
-    randoms_N = Catalog.read(randoms_N_fn, filetype='fits')
+    parser = argparse.ArgumentParser(description='Compute power spectrum/correlation function')
+    parser.add_argument('--tracer', type=str, required=False, default='ELG', choices=['ELG', 'LRG', 'QSO'])
+    parser.add_argument('--region', type=str, required=False, default='NGC', choices=['NGC', 'SGC', 'NS', 'SS'])
+    parser.add_argument('--completeness', type=str, required=False, default='', choices=['', 'complete_'])
+    parser.add_argument('--todo', type=str, required=False, default='power', choices=['power', 'corr', 'window', 'counter'])
+    parser.add_argument('--imock', type=int, required=False, default=0)
+    parser.add_argument('--fc', type=str, required=False, default='', choices=['', '_fc'])
+    args = parser.parse_args()
 
-    # SOUTH
-    data_S_fn = "/global/cfs/cdirs/desi/survey/catalogs/main/mocks/FirstGenMocks/AbacusSummit/Y1v1/mock{:d}/LSScats/{}_{}S_clustering.dat.fits".format(imock, galaxy_type, completeness)
-    randoms_S_fn = "/global/cfs/cdirs/desi/survey/catalogs/main/mocks/FirstGenMocks/AbacusSummit/Y1v1/mock{:d}/LSScats/{}_{}S_0_clustering.ran.fits".format(imock, galaxy_type, completeness)
-    data_S = Catalog.read(data_S_fn, filetype='fits')
-    randoms_S = Catalog.read(randoms_S_fn, filetype='fits')
+    imock = args.imock
+    tracer = args.tracer
+    region = args.region
+    completeness = args.completeness
+    todo = args.todo
+    fc = args.fc
+        
+    zrange = {'ELG': (0.8, 1.6), 'LRG':(0.4, 1.1), 'QSO':(0.8, 3.5)}
     
-    if (galaxy_type == "ELG"):
-        zrange = (0.8, 1.6)
-    else:
-        zrange=None
-    
-    data_NGC_N = select_region('NGC', data_N, zrange)
-    data_NGC_S = select_region('NGC', data_S, zrange)
-    randoms_NGC_N = select_region('NGC', randoms_N, zrange)
-    randoms_NGC_S = select_region('NGC', randoms_S, zrange)
-    
-    randoms_NGC_N['WEIGHT'] = randoms_NGC_N['WEIGHT']*data_NGC_N['WEIGHT'].csum()/randoms_NGC_N['WEIGHT'].csum()
-    randoms_NGC_S['WEIGHT'] = randoms_NGC_S['WEIGHT']*data_NGC_S['WEIGHT'].csum()/randoms_NGC_S['WEIGHT'].csum()
-    
-    data_NGC = data_NGC_N.append(data_NGC_S)
-    randoms_NGC = randoms_NGC_N.append(randoms_NGC_S)
-    
-    data_SGC = select_region('SGC', data_S, zrange)
-    randoms_SGC = select_region('SGC', randoms_S, zrange)
-    
-    data_all = {'NGC': data_NGC, 'SGC': data_SGC}
-    randoms_all = {'NGC': randoms_NGC, 'SGC': randoms_SGC}
-    
-    # Power spectrum parameters
-    edges = {'step': 0.001}
-    
-    for region in ['SGC']:
-        print(region)
-        data = data_all[region]
-        randoms = randoms_all[region]
- 
-        # Output
-        output_dir = '/global/u2/m/mpinon/outputs/'
-        output_fn = 'power_spectrum_mock{:d}_{}_{}{}_zcut.npy'.format(imock, galaxy_type, completeness, region)
+    data, randoms = select_data(imock=imock, tracer=tracer, region=region, completeness=completeness, zrange=zrange[tracer])
+   
+    # Output
+    output_dir = '/global/u2/m/mpinon/outputs/'
 
-        t0 = time.time()
+    t0 = time.time()
 
+    if todo=='power':
+        output_fn = 'power_spectrum_mock{:d}_{}_{}{}{}.npy'.format(imock, tracer, completeness, region, '_zcut' if completeness else '')
+        edges = {'step': 0.001}
         print('Compute power spectrum')
         compute_power(data, randoms, edges, output_dir+output_fn)
         
-        #print('Compute window function')
-        #randoms_positions = get_rdd(randoms)
-        #power = CatalogFFTPower.load(output_dir+output_fn).poles
+    if todo=='corr':
+        output_fn = 'corr_func_mock{:d}_{}_{}{}.npy'.format(imock, tracer, completeness, region)
+        edges = (np.linspace(0., 200., 201), np.linspace(-1, 1, 401))
+        print('Compute correlation function')
+        xi = TwoPointCorrelationFunction('smu', edges,
+                                        data_positions1=np.array(get_rdd(data)), data_weights1=data['WEIGHT'],
+                                        randoms_positions1=np.array(get_rdd(randoms)), randoms_weights1=randoms['WEIGHT'],
+                                        engine='corrfunc', los = 'midpoint', position_type='rdd', 
+                                        nthreads=64, mpicomm=data.mpicomm)
+        xi.save(output_dir+output_fn)
         
-        #boxsizes = [200000, 50000, 20000]
-        #for boxsize in boxsizes:
-        #    window_fn = 'outputs/window_boxsize{:d}_mock{:d}_{}_{}{}.npy'.format(boxsize, imock, galaxy_type, completeness, region)
-        #    window = CatalogSmoothWindow(randoms_positions1=randoms_positions, power_ref=power, edges={'step': 1e-4}, boxsize=boxsize, position_type='rdd').poles
-        #    window.save(window_fn.format(int(boxsize)))
-        
-        #xi = TwoPointCounter('rppi', edges=(np.linspace(0., 4., 41), np.linspace(-80., 80., 81)), 
-        #     positions1=np.array(get_rdd(randoms)), weights1=randoms['WEIGHT'],
-        #     los='midpoint', engine='corrfunc', position_type='rdd', nthreads=64, mpicomm=data.mpicomm)
-        
-        #output_fn = 'RR_rp_mock{:d}_{}_{}{}_short'.format(imock, galaxy_type, completeness, region)
-        #xi.save(output_dir+output_fn)
-    
-        print('Elapsed time: {:.2f} s'.format(time.time() - t0))
+    if todo=='window':
+        output_fn = 'power_spectrum_mock{:d}_{}_{}{}{}.npy'.format(imock, tracer, completeness, region, '_zcut' if completeness else '')
+
+        print('Compute window function')
+        randoms_positions = get_rdd(randoms)
+        power = CatalogFFTPower.load(output_dir+output_fn).poles
+
+        boxsizes = [200000, 50000, 20000]
+        for boxsize in boxsizes:
+            window_fn = '/global/u2/m/mpinon/outputs/window_boxsize{:d}_mock{:d}_{}_{}{}.npy'.format(boxsize, imock, tracer, completeness, region)
+            window = CatalogSmoothWindow(randoms_positions1=randoms_positions, power_ref=power, edges={'step': 1e-4}, boxsize=boxsize, position_type='rdd').poles
+            window.save(window_fn.format(int(boxsize)))
+
+        window_fn = '/global/u2/m/mpinon/outputs/window_boxsize{{:d}}_mock{:d}_{}_{}{}.npy'.format(imock, tracer, completeness, region)
+        window = PowerSpectrumSmoothWindow.concatenate_x(*[PowerSpectrumSmoothWindow.load(window_fn.format(int(boxsize))) for boxsize in boxsizes], frac_nyq=0.9)
+        sep = np.geomspace(1e-4, 4e3, 1024*16)
+        wm = PowerSpectrumSmoothWindowMatrix(power.k, projsin=(0, 2, 4), projsout=(0, 2, 4), weightsout=power.nmodes, window=window, sep=sep)
+        wm.save(output_dir+'wm_mock{:d}_{}_{}{}.npy'.format(imock, tracer, completeness, region))
+
+    if todo=='counter':
+        xi = TwoPointCounter('rppi', edges=(np.linspace(0., 4., 41), np.linspace(-80., 80., 81)), 
+             positions1=np.array(get_rdd(data)), weights1=data['WEIGHT'],
+             los='midpoint', engine='corrfunc', position_type='rdd', nthreads=64, mpicomm=data.mpicomm)
+
+        output_fn = 'DD_rp_mock{:d}_{}_{}{}_short'.format(imock, tracer, completeness, region)
+        xi.save(output_dir+output_fn)
+
+    print('Elapsed time: {:.2f} s'.format(time.time() - t0))
     
     
 if __name__ == "__main__":
