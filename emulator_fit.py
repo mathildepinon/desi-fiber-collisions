@@ -18,17 +18,19 @@ def get_footprint(tracer='ELG', region='NGC', completeness=''):
 #    area = np.load(os.path.join(data_dir, 'mock0_{}_{}{}_area.npy'.format(tracer, completeness, region)))
 #    return CutskyFootprint(area=area, zrange=z, nbar=nbar, cosmo=DESI())
 
-    def select_region(catalog, region):
-        mask = (catalog['Z'] > 0.8) & (catalog['Z'] < 1.6)
-        if region == 'NGC':
+    zrange = {'ELG': (0.8, 1.6), 'LRG':(0.4, 1.1), 'QSO':(0.8, 3.5)}
+
+    def select_region(catalog, region, zrange=None):
+        mask = (catalog['Z'] >= zrange[0]) & (catalog['Z'] <= zrange[1])
+        if region=='NGC':
             mask &= (catalog['RA'] > 88) & (catalog['RA'] < 303)
-        if region == 'SGC':
+        if region=='SGC':
             mask &= (catalog['RA'] < 88) | (catalog['RA'] > 303)
         return catalog[mask]
     
-    def concatenate(list_data, list_randoms, region):
-        list_data = [select_region(catalog, region) for catalog in list_data]
-        list_randoms = [select_region(catalog, region) for catalog in list_randoms]
+    def concatenate(list_data, list_randoms, region, zrange=None):
+        list_data = [select_region(catalog, region, zrange) for catalog in list_data]
+        list_randoms = [select_region(catalog, region, zrange) for catalog in list_randoms]
         wsums_data = [data['WEIGHT'].csum() for data in list_data]
         wsums_randoms = [randoms['WEIGHT'].csum() for randoms in list_randoms]
         alpha = sum(wsums_data) / sum(wsums_randoms)
@@ -45,11 +47,11 @@ def get_footprint(tracer='ELG', region='NGC', completeness=''):
     randoms_NS = [Catalog.read(os.path.join(catalog_dir, '{}_{}{}_0_clustering.ran.fits'.format(tracer, completeness, reg))) for reg in ['N', 'S']]
     
     if region in ['NGC', 'SGC', 'NS']:
-        data, randoms = concatenate(data_NS, randoms_NS, region)
+        data, randoms = concatenate(data_NS, randoms_NS, region, zrange[tracer])
     elif region in ['S', 'NGCS', 'SGCS']:
-        data, randoms = concatenate(data_NS[1:], randoms_NS[1:], region)
+        data, randoms = concatenate(data_NS[1:], randoms_NS[1:], region, zrange[tracer])
     elif region in ['N']:
-        data, randoms = concatenate(data_NS[:1], randoms_NS[:1], region)
+        data, randoms = concatenate(data_NS[:1], randoms_NS[:1], region, zrange[tracer])
     else:
         raise ValueError('Unknown region {}'.format(region))
         
@@ -88,11 +90,8 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
     if save_emulator or emulator_fn is None:
         from desilike.theories.galaxy_clustering import StandardPowerSpectrumTemplate, ShapeFitPowerSpectrumTemplate
         #template = StandardPowerSpectrumTemplate(z=1.1)
-        if tracer=='ELG':
-            z=1.1
-        if tracer=='LRG':
-            z=0.8
-        template = ShapeFitPowerSpectrumTemplate(z=z)
+        z = {'ELG': 1.1, 'LRG': 0.8, 'QSO': 1.4}
+        template = ShapeFitPowerSpectrumTemplate(z=z[tracer])
         theory = Theory(template=template, **kwargs)
     else:
         from desilike.emulators import EmulatedCalculator
@@ -117,7 +116,13 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
     else:
         fiber_collisions = None
 
-    observable = TracerPowerSpectrumMultipolesObservable(klim={0: [0.02, 0.2, 0.005], 2: [0.02, 0.2, 0.005], 4: [0.02, 0.2, 0.005]},
+    if tracer=='ELG':
+        klim={0: [0.02, 0.2, 0.005], 2: [0.02, 0.2, 0.005], 4: [0.02, 0.2, 0.005]}
+    if tracer=='LRG':
+        klim={0: [0.02, 0.15, 0.005], 2: [0.02, 0.15, 0.005], 4: [0.02, 0.15, 0.005]}
+    if tracer=='QSO':
+        klim={0: [0.02, 0.25, 0.005], 2: [0.02, 0.25, 0.005], 4: [0.02, 0.25, 0.005]}
+    observable = TracerPowerSpectrumMultipolesObservable(klim=klim,
                                                          data=os.path.join(data_dir, 'power_spectrum_mock*_{}_{}{}{}.npy'.format(tracer, completeness, region, '_zcut' if completeness else '')),
                                                          wmatrix=wmatrix,
                                                          fiber_collisions=fiber_collisions,
@@ -156,11 +161,8 @@ def get_corr_likelihood(tracer='ELG', region='NGC', completeness='', theory_name
 
     if save_emulator or emulator_fn is None:
         from desilike.theories.galaxy_clustering import StandardPowerSpectrumTemplate, ShapeFitPowerSpectrumTemplate
-        if tracer=='ELG':
-            z=1.1
-        if tracer=='LRG':
-            z=0.8
-        template = ShapeFitPowerSpectrumTemplate(z=z)
+        z = {'ELG': 1.1, 'LRG': 0.8, 'QSO': 1.4}
+        template = ShapeFitPowerSpectrumTemplate(z=z[tracer])
 
         theory = Theory(template=template, **kwargs)
     else:
@@ -180,8 +182,11 @@ def get_corr_likelihood(tracer='ELG', region='NGC', completeness='', theory_name
     else:
         fiber_collisions = None
 
-    
-    observable = TracerCorrelationFunctionMultipolesObservable(slim={0: [30., 150., 4.], 2: [30., 150., 4.], 4: [30., 150., 4.]},
+    if tracer=='ELG':
+        slim={0: [20., 150., 4.], 2: [20., 150., 4.], 4: [20., 150., 4.]}
+    if tracer=='LRG':
+        slim={0: [30., 150., 4.], 2: [30., 150., 4.], 4: [30., 150., 4.]}
+    observable = TracerCorrelationFunctionMultipolesObservable(slim=slim,
                                                                data=os.path.join(data_dir, 'corr_func_mock*_{}_{}{}.npy'.format(tracer, completeness, region)),
                                                                fiber_collisions=fiber_collisions,
                                                                theory=theory)
@@ -263,5 +268,5 @@ if __name__ == '__main__':
         
         if corr:
             likelihood = get_corr_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, emulator_fn=os.path.join(emulator_dir, 'corr_{}.npy'))
-            sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=42, save_fn=os.path.join(chains_dir, 'corr_{}{}_*.npy'.format(theory_name, fc)))
+            sampler = EmceeSampler(likelihood, chains=os.path.join(chains_dir, 'corr_{}{}_*.npy'.format(theory_name, fc)), nwalkers=40, seed=42, save_fn=os.path.join(chains_dir, 'corr_{}{}_*.npy'.format(theory_name, fc)))
             sampler.run(check={'max_eigen_gr': 0.02})

@@ -93,7 +93,7 @@ def plot_power(power):
     plt.xlabel(r'$k$  [$h$/Mpc]')
     plt.ylabel(r'$kP(k)$ [$(\mathrm{Mpc}/h)^{2}$]')
     fig = plt.gcf()
-    fig.set_size_inches(6, 4)
+    #fig.set_size_inches(6, 4)
     
     
 def plot_mean_poles(poles, k, ells, std=None, ax=None, linestyle='-', label=True, legend=True, xlabel=True, ylabel=True):
