@@ -51,7 +51,7 @@ def select_data(imock=0, tracer='ELG', region='NGC', completeness='', zrange=Non
     return data_toret, randoms_toret
 
 
-def compute_power(data, randoms, edges, output_name, ells=(0, 2, 4), los='firstpoint', boxpad=1.5, cellsize=6, resampler='tsc'):
+def compute_power(data, randoms, edges, output_name, ells=(0, 2, 4), th=0, direct_edges=None, los='firstpoint', boxpad=1.5, cellsize=6, resampler='tsc'):
     randoms_positions = get_rdd(randoms)
     data_positions = get_rdd(data)
     randoms_weights = randoms['WEIGHT']
@@ -61,7 +61,8 @@ def compute_power(data, randoms, edges, output_name, ells=(0, 2, 4), los='firstp
     power = CatalogFFTPower(data_positions1=data_positions, randoms_positions1=randoms_positions,
                             data_weights1=data_weights, randoms_weights1=randoms_weights,
                             position_type='rdd', edges=edges, ells=ells, los=los,
-                            boxpad=boxpad, cellsize=cellsize, resampler=resampler)
+                            boxpad=boxpad, cellsize=cellsize, resampler=resampler,
+                            direct_selection_attrs={'rp': (0, th)}, direct_edges=direct_edges)
     
     print('Save power spectrum')
     power.save(output_name)
@@ -72,13 +73,13 @@ def compute_power(data, randoms, edges, output_name, ells=(0, 2, 4), los='firstp
 #    data_name = 'power_spectrum_mock{:d}_{}_{}{}.npy'.format(imock, galaxy_type, completeness, region)
     
     
-def get_mean_poles(powers, ells):
+def get_mean_poles(powers, ells, rebin=1):
     """
     Get average multipoles and covariance matrix from a list of power spectra
     """
     nells = len(ells)
     n = len(powers)
-    poles = [np.ravel(res.poles(ell=ells, complex=False)) for res in powers]
+    poles = [np.ravel(res.poles[:res.poles.shape[0] // rebin * rebin:rebin](ell=ells, complex=False)) for res in powers]
     mean_poles = np.mean(poles, axis=0)
     pk = mean_poles.reshape((nells, len(mean_poles)//nells))
     cov = np.cov(poles, rowvar=False)
@@ -146,7 +147,7 @@ def plot_comparison(nmocks, ells, galaxy_type):
             
     axes[0][0].plot([], [], ls='-', label='Complete', color='black')
     axes[0][0].plot([], [], ls=':', label='Fiber assigned', color='black')
-    axes[1][0].set_ylabel(r'$k \Delta P(k)/$ [$(\mathrm{Mpc}/h)^{2}$]')
+    axes[1][0].set_ylabel(r'$k \Delta P(k)$ [$(\mathrm{Mpc}/h)^{2}$]')
     axes[1][0].set_xlabel(r'$k$  [$h$/Mpc]')
     axes[1][1].set_xlabel(r'$k$  [$h$/Mpc]')
     axes[0][0].legend()
@@ -160,9 +161,10 @@ def main():
     parser.add_argument('--tracer', type=str, required=False, default='ELG', choices=['ELG', 'LRG', 'QSO'])
     parser.add_argument('--region', type=str, required=False, default='NGC', choices=['NGC', 'SGC', 'NS', 'SS'])
     parser.add_argument('--completeness', type=str, required=False, default='', choices=['', 'complete_'])
-    parser.add_argument('--todo', type=str, required=False, default='power', choices=['power', 'corr', 'window', 'counter'])
+    parser.add_argument('--todo', type=str, required=False, default='power', choices=['power', 'corr', 'window', 'wmatrix', 'counter'])
     parser.add_argument('--imock', type=int, required=False, default=0)
     parser.add_argument('--fc', type=str, required=False, default='', choices=['', '_fc'])
+    parser.add_argument('--rp_cut', type=float, required=False, default=0)
     args = parser.parse_args()
 
     imock = args.imock
@@ -171,58 +173,82 @@ def main():
     completeness = args.completeness
     todo = args.todo
     fc = args.fc
+    rp_cut = args.rp_cut
         
     zrange = {'ELG': (0.8, 1.6), 'LRG':(0.4, 1.1), 'QSO':(0.8, 3.5)}
     
     data, randoms = select_data(imock=imock, tracer=tracer, region=region, completeness=completeness, zrange=zrange[tracer])
+    mpicomm = data.mpicomm
    
     # Output
-    output_dir = '/global/u2/m/mpinon/outputs/'
+    #output_dir = '/global/u2/m/mpinon/outputs/'
+    output_dir = '/global/cfs/cdirs/desi/users/mpinon/'
 
     t0 = time.time()
 
     if todo=='power':
-        output_fn = 'power_spectrum_mock{:d}_{}_{}{}{}.npy'.format(imock, tracer, completeness, region, '_zcut' if completeness else '')
-        edges = {'step': 0.001}
+        output_fn = 'power_spectra/power_spectrum_mock{:d}_{}_{}{}{}_th{:.1f}_directedges_max5000.npy'.format(imock, tracer, completeness, region, '_zcut' if completeness else '', rp_cut)
+        edges = {'step': 0.005}
+        direct_edges = {'step': 0.1, 'max': 5000.}
         print('Compute power spectrum')
-        compute_power(data, randoms, edges, output_dir+output_fn)
+        os.environ['OMP_NUM_THREADS'] = '4'
+        compute_power(data, randoms, edges, output_dir+output_fn, th=rp_cut, direct_edges=direct_edges)
         
     if todo=='corr':
-        output_fn = 'corr_func_mock{:d}_{}_{}{}.npy'.format(imock, tracer, completeness, region)
+        # rp threshold
+        th = 2.5
+        output_fn = 'corr_func_mock{:d}_{}_{}{}_th{:.1f}.npy'.format(imock, tracer, completeness, region, th)
         edges = (np.linspace(0., 200., 201), np.linspace(-1, 1, 401))
         print('Compute correlation function')
         xi = TwoPointCorrelationFunction('smu', edges,
                                         data_positions1=np.array(get_rdd(data)), data_weights1=data['WEIGHT'],
                                         randoms_positions1=np.array(get_rdd(randoms)), randoms_weights1=randoms['WEIGHT'],
+                                        selection_attrs = {'rp': (th, 1e6)},
                                         engine='corrfunc', los = 'midpoint', position_type='rdd', 
-                                        nthreads=64, mpicomm=data.mpicomm)
+                                        nthreads=64, mpicomm=mpicomm)
         xi.save(output_dir+output_fn)
         
-    if todo=='window':
-        output_fn = 'power_spectrum_mock{:d}_{}_{}{}{}.npy'.format(imock, tracer, completeness, region, '_zcut' if completeness else '')
-
-        print('Compute window function')
-        randoms_positions = get_rdd(randoms)
-        power = CatalogFFTPower.load(output_dir+output_fn).poles
-
-        boxsizes = [200000, 50000, 20000]
+    boxsizes = [200000, 50000, 20000]
+    #boxsizes = [20000]
+    power_fn = 'power_spectra/power_spectrum_mock{:d}_{}_{}{}{}.npy'.format(imock, tracer, completeness, region, '_zcut' if completeness else '')
+    randoms_positions = get_rdd(randoms)
+    power = CatalogFFTPower.load(output_dir+power_fn).poles
+    direct = False
+    
+    if direct:
+        direct_edges = {'step': 0.1, 'max': 5000.}
+        direct_selection_attrs = {'rp': (0, rp_cut)}
+    else:
+        direct_edges = None
+        direct_selection_attrs = None
+    
+    if todo == 'window':
+        print('Compute window function')        
         for boxsize in boxsizes:
-            window_fn = '/global/u2/m/mpinon/outputs/window_boxsize{:d}_mock{:d}_{}_{}{}.npy'.format(boxsize, imock, tracer, completeness, region)
-            window = CatalogSmoothWindow(randoms_positions1=randoms_positions, power_ref=power, edges={'step': 1e-4}, boxsize=boxsize, position_type='rdd').poles
-            window.save(window_fn.format(int(boxsize)))
+            window_fn = os.path.join(output_dir, 'windows/window_boxsize{:d}_mock{:d}_{}_{}{}{}{}.npy'.format(boxsize, imock, tracer, completeness, region, '_rp{}'.format(rp_cut) if rp_cut else '', '_directedges_max5000' if direct else ''))
+            window = CatalogSmoothWindow(randoms_positions1=randoms_positions, power_ref=power, edges={'step': 1e-4}, boxsize=boxsize, position_type='rdd', direct_selection_attrs=direct_selection_attrs, direct_edges=direct_edges).poles
+            if mpicomm.rank == 0: window.save(window_fn.format(int(boxsize)))
+    
+    if todo == 'wmatrix':
+         if mpicomm.rank == 0:
+            window_fn = os.path.join(output_dir, 'windows/window_boxsize{{:d}}_mock{:d}_{}_{}{}{}{}.npy'.format(imock, tracer, completeness, region,  '_rp{}'.format(rp_cut) if rp_cut and direct else '', '_directedges_max5000' if direct else ''))
+            window = PowerSpectrumSmoothWindow.concatenate_x(*[PowerSpectrumSmoothWindow.load(window_fn.format(int(boxsize))) for boxsize in boxsizes], frac_nyq=0.9)
+            print(window.corr_direct_nonorm, window.power_direct_nonorm)
+            window.save(output_dir+'windows/window_mock{:d}_{}_{}{}{}{}.npy'.format(imock, tracer, completeness, region, '_rp{}'.format(rp_cut) if rp_cut and direct else '', '_directedges_max5000' if direct else ''))
+            sep = np.geomspace(1e-4, 4e3, 1024*16)
+            if direct:
+                wm = PowerSpectrumSmoothWindowMatrix(power.k, projsin=(0, 2, 4), projsout=(0, 2, 4), weightsout=power.nmodes, window=window.to_real(sep=sep), sep=sep)
+            else:
+                wm = PowerSpectrumSmoothWindowMatrix(power.k, projsin=(0, 2, 4), projsout=(0, 2, 4), weightsout=power.nmodes, window=window.to_real(sep=sep).select(rp=(rp_cut, np.inf)), sep=sep)
+            wm.save(output_dir+'windows/wm_mock{:d}_{}_{}{}{}{}.npy'.format(imock, tracer, completeness, region, '_rp{}'.format(rp_cut) if rp_cut else '', '_directedges_max5000' if direct_edges is not None else ''))
 
-        window_fn = '/global/u2/m/mpinon/outputs/window_boxsize{{:d}}_mock{:d}_{}_{}{}.npy'.format(imock, tracer, completeness, region)
-        window = PowerSpectrumSmoothWindow.concatenate_x(*[PowerSpectrumSmoothWindow.load(window_fn.format(int(boxsize))) for boxsize in boxsizes], frac_nyq=0.9)
-        sep = np.geomspace(1e-4, 4e3, 1024*16)
-        wm = PowerSpectrumSmoothWindowMatrix(power.k, projsin=(0, 2, 4), projsout=(0, 2, 4), weightsout=power.nmodes, window=window, sep=sep)
-        wm.save(output_dir+'wm_mock{:d}_{}_{}{}.npy'.format(imock, tracer, completeness, region))
-
-    if todo=='counter':
-        xi = TwoPointCounter('rppi', edges=(np.linspace(0., 4., 41), np.linspace(-80., 80., 81)), 
+    if todo == 'counter':
+        xi = TwoPointCounter('rppi', edges=(np.linspace(0., 40, 401), np.linspace(-80., 80., 81)), 
              positions1=np.array(get_rdd(data)), weights1=data['WEIGHT'],
+             positions2=np.array(get_rdd(randoms)), weights2=randoms['WEIGHT'],
              los='midpoint', engine='corrfunc', position_type='rdd', nthreads=64, mpicomm=data.mpicomm)
 
-        output_fn = 'DD_rp_mock{:d}_{}_{}{}_short'.format(imock, tracer, completeness, region)
+        output_fn = 'DR_rp_mock{:d}_{}_{}{}'.format(imock, tracer, completeness, region)
         xi.save(output_dir+output_fn)
 
     print('Elapsed time: {:.2f} s'.format(time.time() - t0))
