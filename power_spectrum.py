@@ -196,14 +196,14 @@ def main():
         
     if todo=='corr':
         # rp threshold
-        th = 2.5
-        output_fn = 'corr_func_mock{:d}_{}_{}{}_th{:.1f}.npy'.format(imock, tracer, completeness, region, th)
+        th = 0
+        output_fn = 'corr_func_mock{:d}_{}_{}{}_th{:.1f}_test.npy'.format(imock, tracer, completeness, region, th)
         edges = (np.linspace(0., 200., 201), np.linspace(-1, 1, 401))
         print('Compute correlation function')
         xi = TwoPointCorrelationFunction('smu', edges,
                                         data_positions1=np.array(get_rdd(data)), data_weights1=data['WEIGHT'],
                                         randoms_positions1=np.array(get_rdd(randoms)), randoms_weights1=randoms['WEIGHT'],
-                                        selection_attrs = {'rp': (th, 1e6)},
+                                        #selection_attrs = {'rp': (th, 1e6)},
                                         engine='corrfunc', los = 'midpoint', position_type='rdd', 
                                         nthreads=64, mpicomm=mpicomm)
         xi.save(output_dir+output_fn)

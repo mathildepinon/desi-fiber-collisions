@@ -133,6 +133,8 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
                                                          theory=theory)
     covariance = ObservablesCovarianceMatrix(observable, footprints=footprint, resolution=5)
     cov = covariance(b1=0.2)
+    #import numpy as np
+    #np.save(os.path.join(data_dir, 'cov_{}_{}{}{}{}.npy'.format(tracer, completeness, region, '_rp{:.1f}'.format(rp_cut) if (rp_cut and not fc) else '', '_directedges_max5000' if rp_cut and direct else '')), cov)
     likelihood = ObservablesGaussianLikelihood(observables=[observable], covariance=cov)
     likelihood.all_params['b1'].update(ref={'limits': [0.25, 0.35]})
     #likelihood.all_params['b2'].update(ref={'limits': [0.45, 0.55]})
@@ -279,12 +281,13 @@ if __name__ == '__main__':
         
         if power:
             likelihood = get_power_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, fc=fc, rp_cut=rp_cut, direct=direct, emulator_fn=os.path.join(emulator_dir, 'power_xinmax0.35_{}.npy'), imock=imock)
-            sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=42, save_fn=os.path.join(chains_dir, 'power_xinmax0.35_{}{}{}{}_{}*.npy'.format(theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '', '_directedges_max5000' if rp_cut and direct else '', 'mock{}_'.format(imock) if imock is not None else '')))
+            sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=43, save_fn=os.path.join(chains_dir, 'power_xinmax0.35_{}{}{}{}_{}*.npy'.format(theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '', '_directedges_max5000' if rp_cut and direct else '', 'mock{}_'.format(imock) if imock is not None else '')))
             sampler.run(check={'max_eigen_gr': 0.02})
         
         if corr:
             likelihood = get_corr_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, fc=fc, rp_cut=rp_cut, emulator_fn=os.path.join(emulator_dir, 'corr_{}.npy'), imock=imock)
-            sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=42, save_fn=os.path.join(chains_dir, 'corr_{}{}{}__{}*.npy'.format(theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '', 'mock{}_'.format(imock) if imock is not None else '')))
+            chains_path  = os.path.join(chains_dir, 'corr_{}{}{}_{}*.npy'.format(theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '', 'mock{}_'.format(imock) if imock is not None else ''))
+            sampler = EmceeSampler(likelihood, chains=chains_path, nwalkers=40, save_fn=chains_path)
             sampler.run(check={'max_eigen_gr': 0.02})
             
     if 'importance' in args.todo:
@@ -293,20 +296,20 @@ if __name__ == '__main__':
         
         if power:
             likelihood = get_power_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, fc=fc, rp_cut=rp_cut, direct=direct, solve=True, emulator_fn=os.path.join(emulator_dir, 'power_xinmax0.35_{}.npy'), imock=imock)
-            chain = Chain.concatenate([Chain.load(os.path.join(chains_dir.format(''), 'power_xinmax0.35_velocileptors{}{}{}_{:d}.npy'.format(fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '', '_directedges_max5000' if rp_cut and direct else '', i))).remove_burnin(0.5)[::10] for i in range(8)])
-            chain.aweight[...] *= np.exp(-chain['logposterior'])
+            chain = Chain.concatenate([Chain.load(os.path.join(chains_dir, 'power_xinmax0.35_{}_mock{}_{:d}.npy'.format(theory_name, imock, i))).remove_burnin(0.5)[::10] for i in range(8)])
+            chain.aweight[...] *= np.exp(chain.logposterior.max() - chain.logposterior)
             
-            sampler = ImportanceSampler(likelihood, chain, save_fn=os.path.join(chains_dir, 'power_importance_mock{}_xinmax0.35_{}{}{}{}.npy'.format(imock, theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '', '_directedges_max5000' if rp_cut and direct else '')))
+            sampler = ImportanceSampler(likelihood, chain, save_fn=os.path.join(chains_dir, 'power_mock{}_importance_xinmax0.35_{}{}{}{}.npy'.format(imock, theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '', '_directedges_max5000' if rp_cut and direct else '')))
             sampler.run()
             
         if corr:
             likelihood = get_corr_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, fc=fc, rp_cut=rp_cut, solve=True, emulator_fn=os.path.join(emulator_dir, 'corr_{}.npy'), imock=imock)
-            chain = Chain.concatenate([Chain.load(os.path.join(chains_dir.format(''), 'corr_velocileptors{}{}_{:d}.npy'.format(fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '', i))).remove_burnin(0.5)[:100:10] for i in range(8)])
+            chain = Chain.concatenate([Chain.load(os.path.join(chains_dir, 'corr_{}_mock{}_{:d}.npy'.format(theory_name, imock, i))).remove_burnin(0.5)[::10] for i in range(8)])
             chain['mean.loglikelihood'] = chain['loglikelihood'].copy()
             chain['mean.logprior'] = chain['logprior'].copy()
-            chain.aweight[...] *= np.exp(-chain['logposterior'])
+            chain.aweight[...] *= np.exp(chain.logposterior.max() - chain.logposterior)
             
-            sampler = ImportanceSampler(likelihood, chain, save_fn=os.path.join(chains_dir, 'corr_importance_mock{}_{}{}{}_test.npy'.format(imock, theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '')))
+            sampler = ImportanceSampler(likelihood, chain, save_fn=os.path.join(chains_dir, 'corr_mock{}_importance_{}{}{}.npy'.format(imock, theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '')))
             sampler.run()
 
             
