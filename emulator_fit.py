@@ -2,8 +2,8 @@ import os
 import numpy as np
 import argparse
 
-data_dir = '/global/cfs/cdirs/desi/users/mpinon/'
-#corr_dir = '/global/cfs/cdirs/desi/users/eburtin'
+#data_dir = '/global/cfs/cdirs/desi/users/mpinon/'
+data_dir = '/Users/mp270220/Work/fiber_collisions/'
 
 
 def get_footprint(tracer='ELG', region='NGC', completeness=''):
@@ -13,11 +13,6 @@ def get_footprint(tracer='ELG', region='NGC', completeness=''):
     from desilike.observables.galaxy_clustering import CutskyFootprint
     from cosmoprimo.fiducial import DESI
     
-#    z = np.load(os.path.join(data_dir, 'mock0_{}_{}{}_density_z.npy'.format(tracer, completeness, region)))
-#    nbar = np.load(os.path.join(data_dir, 'mock0_{}_{}{}_density_nbar.npy'.format(tracer, completeness, region)))
-#    area = np.load(os.path.join(data_dir, 'mock0_{}_{}{}_area.npy'.format(tracer, completeness, region)))
-#    return CutskyFootprint(area=area, zrange=z, nbar=nbar, cosmo=DESI())
-
     zrange = {'ELG': (0.8, 1.6), 'LRG':(0.4, 1.1), 'QSO':(0.8, 3.5)}
 
     def select_region(catalog, region, zrange=None):
@@ -259,9 +254,9 @@ if __name__ == '__main__':
     direct = args.direct
     imock = args.imock
     
-    emulator_dir = '/global/cfs/cdirs/desi/users/mpinon/emulators/emulators_shapefit_{}'.format(tracer)
-    profiles_dir = '/global/cfs/cdirs/desi/users/mpinon/profiles/profiles_shapefit_{}_{}{}'.format(tracer, completeness, region)
-    chains_dir = '/global/cfs/cdirs/desi/users/mpinon/chains/chains_shapefit_{}_{}{}'.format(tracer, completeness, region)
+    emulator_dir = os.path.join(data_dir, 'emulators/emulators_shapefit_{}'.format(tracer))
+    profiles_dir = os.path.join(data_dir, 'profiles/profiles_shapefit_{}_{}{}'.format(tracer, completeness, region))
+    chains_dir = os.path.join(data_dir, 'chains/chains_shapefit_{}_{}{}'.format(tracer, completeness, region))
     
     if 'emulator' in todo:
         if power: get_power_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, save_emulator=True, emulator_fn=os.path.join(emulator_dir, 'power_xinmax0.35_{}.npy'))
@@ -282,7 +277,7 @@ if __name__ == '__main__':
             profiler.maximize(niterations=10)
      
     if 'sampling' in todo:
-        from desilike.samplers import ZeusSampler, EmceeSampler
+        from desilike.samplers import EmceeSampler
         
         if power:
             likelihood = get_power_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, fc=fc, rp_cut=rp_cut, direct=direct, emulator_fn=os.path.join(emulator_dir, 'power_xinmax0.35_{}.npy'), imock=imock)
