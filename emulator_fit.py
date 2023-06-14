@@ -70,14 +70,19 @@ def get_footprint(tracer='ELG', region='NGC', completeness=''):
     
 
 
-def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_name='velocileptors', solve=True, fc=False, rp_cut=0, direct=True, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), imock=None):
+def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_name='velocileptors', solve=True, fc=False, rp_cut=0, direct=True, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), footprint_fn=os.path.join('.', 'footprint_{}.npy'), imock=None):
 
     from desilike.theories.galaxy_clustering import LPTVelocileptorsTracerPowerSpectrumMultipoles, PyBirdTracerPowerSpectrumMultipoles
-    from desilike.observables.galaxy_clustering import TracerPowerSpectrumMultipolesObservable, ObservablesCovarianceMatrix
+    from desilike.observables.galaxy_clustering import TracerPowerSpectrumMultipolesObservable, ObservablesCovarianceMatrix, CutskyFootprint
     from desilike.likelihoods import ObservablesGaussianLikelihood
     
     print('footprint')
-    footprint = get_footprint(tracer=tracer, region=region, completeness=completeness)
+    footprint_fn = footprint_fn.format(tracer)
+    if not os.path.isfile(footprint_fn):
+        footprint = get_footprint(tracer=tracer, region=region, completeness=completeness)
+        footprint.save(footprint_fn)
+    else:
+        footprint = CutskyFootprint.load(footprint_fn)
     
     kwargs = {}
     if 'bird' in theory_name:
@@ -85,7 +90,9 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
         Theory = PyBirdTracerPowerSpectrumMultipoles
     else:
         Theory = LPTVelocileptorsTracerPowerSpectrumMultipoles
-    emulator_fn = emulator_fn.format(theory_name)
+    
+    if emulator_fn is not None:
+        emulator_fn = emulator_fn.format(theory_name)
 
     if save_emulator or emulator_fn is None:
         from desilike.theories.galaxy_clustering import StandardPowerSpectrumTemplate, ShapeFitPowerSpectrumTemplate
@@ -103,7 +110,7 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
     wmatrix = BaseMatrix.load(os.path.join(data_dir, 'windows/wm_mock0_{}_{}{}{}{}.npy'.format(tracer, completeness, region, '_rp{:.1f}'.format(rp_cut) if (rp_cut and not fc) else '', '_directedges_max5000' if rp_cut and direct else '')))
     kinrebin = 10
     wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // kinrebin * kinrebin, kinrebin))
-    if tracer=='QSO':
+    if tracer == 'QSO':
         wmatrix.select_x(xinlim=(0.005, 0.30))
     else:
         wmatrix.select_x(xinlim=(0.005, 0.35))
@@ -133,8 +140,6 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
                                                          theory=theory)
     covariance = ObservablesCovarianceMatrix(observable, footprints=footprint, resolution=5)
     cov = covariance(b1=0.2)
-    #import numpy as np
-    #np.save(os.path.join(data_dir, 'cov_{}_{}{}{}{}.npy'.format(tracer, completeness, region, '_rp{:.1f}'.format(rp_cut) if (rp_cut and not fc) else '', '_directedges_max5000' if rp_cut and direct else '')), cov)
     likelihood = ObservablesGaussianLikelihood(observables=[observable], covariance=cov)
     likelihood.all_params['b1'].update(ref={'limits': [0.25, 0.35]})
     #likelihood.all_params['b2'].update(ref={'limits': [0.45, 0.55]})
