@@ -2,8 +2,8 @@ import os
 import numpy as np
 import argparse
 
-#data_dir = '/global/cfs/cdirs/desi/users/mpinon/'
-data_dir = '/Users/mp270220/Work/fiber_collisions/'
+data_dir = '/global/cfs/cdirs/desi/users/mpinon/'
+#data_dir = '/Users/mp270220/Work/fiber_collisions/'
 
 
 def get_footprint(tracer='ELG', region='NGC', completeness=''):
