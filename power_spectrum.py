@@ -20,15 +20,17 @@ def select_region(region, catalog, zrange=None):
         mask = (catalog['RA'] < 88) | (catalog['RA'] > 303)
     if zrange is not None:
         mask &= (catalog['Z'] >= zrange[0]) & (catalog['Z'] <= zrange[1])
+        #mask &= (catalog['Z_SNAP'] >= zrange[0]) & (catalog['Z_SNAP'] <= zrange[1])
     return catalog[mask]
 
 
 def get_rdd(catalog, cosmo=fiducial.DESI()):
     ra, dec, z = catalog['RA'], catalog['DEC'], catalog['Z']
+    #ra, dec, z = catalog['RA'], catalog['DEC'], catalog['Z_SNAP']
     return [ra, dec, cosmo.comoving_radial_distance(z)]
 
 
-def select_data(imock=0, tracer='ELG', region='NGC', completeness='', zrange=None):
+def select_data(imock=0, tracer='ELG', region='NGC', completeness='', zrange=None, add_zcosmo=False):
     catalog_dir = '/global/cfs/cdirs/desi/survey/catalogs/main/mocks/FirstGenMocks/AbacusSummit/Y1v1/mock{:d}/LSScats'.format(imock)
     data_N_fn = os.path.join(catalog_dir, '{}_{}N_clustering.dat.fits'.format(tracer, completeness))
     data_S_fn = os.path.join(catalog_dir, '{}_{}S_clustering.dat.fits'.format(tracer, completeness))
@@ -38,17 +40,46 @@ def select_data(imock=0, tracer='ELG', region='NGC', completeness='', zrange=Non
     data = {'N': Catalog.read(data_N_fn), 'S': Catalog.read(data_S_fn)}
     randoms = {'N': Catalog.read(randoms_N_fn), 'S': Catalog.read(randoms_S_fn)}
     
-    data_selected = {key: select_region(region, val, zrange) for (key, val) in data.items()}
-    randoms_selected = {key: select_region(region, val, zrange) for (key, val) in randoms.items()}
+    z = {'ELG': 1.1, 'LRG': 0.8, 'QSO': 1.4}
+    cosmo=fiducial.DESI()
+    output_dir = '/global/cfs/cdirs/desi/users/mpinon/'
     
-    if region=='NGC':
-        for key in randoms_selected.keys():
-            randoms_selected[key]['WEIGHT'] = randoms_selected[key]['WEIGHT']*data_selected[key]['WEIGHT'].csum()/randoms_selected[key]['WEIGHT'].csum()
+    if add_zcosmo:
+        print('adding z cosmo')
+        columns = ['RA', 'DEC', 'Z', 'Z_COSMO', 'STATUS']
+        y5_fn = '/global/cfs/cdirs/desi/cosmosim/FirstGenMocks/AbacusSummit/CutSky/{}/z{:.3f}/cutsky_{}_z1.100_AbacusSummit_base_c000_ph{:03d}.fits'.format(tracer, z[tracer], tracer, imock)
+        y5_data = Catalog.read(y5_fn, filetype='fits')[columns]
+        
+        intersect, indy1, indy5 = np.intersect1d(data['N'].to_array(columns=['RA', 'DEC', 'Z']), y5_data.to_array(columns=['RA', 'DEC', 'Z']), return_indices=True)
+        print('done')
+        data['N']['Z_COSMO'] = y5_data['Z_COSMO'][indy5]
+        data['N']['Z_COSMO'][indy1] = y5_data['Z_COSMO'][indy5]
+        output_dir = '/global/cfs/cdirs/desi/users/mpinon/'
+        data['N'].write(os.path.join(output_dir, 'cutsky_{}_z1.100_AbacusSummit_mock{}_zcosmo.fits'.format(tracer, imock)))
+        
+    #clight = 299792458.
+    #bg = cosmo_abacus.get_background()
+    #hz = 100*bg.efunc(z[tracer])
+    #ulos = (data['N']['Z'] - data['N']['Z_COSMO']) / (1 + data['N']['Z_COSMO'])
+    dataN = Catalog.read(os.path.join(output_dir, 'cutsky_{}_z1.100_AbacusSummit_mock{}_zcosmo.fits'.format(tracer, imock)))
+    dataN['Z_SNAP'] = dataN['Z_COSMO'] + (dataN['Z'] - dataN['Z_COSMO']) * (1 + z[tracer]) / (1 + dataN['Z_COSMO'])
+    dataN.write(os.path.join(output_dir, 'cutsky_{}_z1.100_AbacusSummit_mock{}_zcosmo.fits'.format(tracer, imock)))
+    
+    if region in ['N', 'S']:
+        return data[region], randoms[region]
+    
+    else:    
+        data_selected = {key: select_region(region, val, zrange) for (key, val) in data.items()}
+        randoms_selected = {key: select_region(region, val, zrange) for (key, val) in randoms.items()}
 
-    data_toret = Catalog.concatenate([data_selected[key] for key in data_selected.keys()])
-    randoms_toret = Catalog.concatenate([randoms_selected[key] for key in randoms_selected.keys()])
-    
-    return data_toret, randoms_toret
+        if region=='NGC':
+            for key in randoms_selected.keys():
+                randoms_selected[key]['WEIGHT'] = randoms_selected[key]['WEIGHT']*data_selected[key]['WEIGHT'].csum()/randoms_selected[key]['WEIGHT'].csum()
+
+        data_toret = Catalog.concatenate([data_selected[key] for key in data_selected.keys()])
+        randoms_toret = Catalog.concatenate([randoms_selected[key] for key in randoms_selected.keys()])
+
+        return data_toret, randoms_toret
 
 
 def compute_power(data, randoms, edges, output_name, ells=(0, 2, 4), th=0, direct_edges=None, los='firstpoint', boxpad=1.5, cellsize=6, resampler='tsc'):
@@ -61,8 +92,8 @@ def compute_power(data, randoms, edges, output_name, ells=(0, 2, 4), th=0, direc
     power = CatalogFFTPower(data_positions1=data_positions, randoms_positions1=randoms_positions,
                             data_weights1=data_weights, randoms_weights1=randoms_weights,
                             position_type='rdd', edges=edges, ells=ells, los=los,
-                            boxpad=boxpad, cellsize=cellsize, resampler=resampler,
-                            direct_selection_attrs={'rp': (0, th)}, direct_edges=direct_edges)
+                            boxpad=boxpad, cellsize=cellsize, resampler=resampler)
+                            #direct_selection_attrs={'rp': (0, th)}, direct_edges=direct_edges)
     
     print('Save power spectrum')
     power.save(output_name)
@@ -159,9 +190,9 @@ def main():
     
     parser = argparse.ArgumentParser(description='Compute power spectrum/correlation function')
     parser.add_argument('--tracer', type=str, required=False, default='ELG', choices=['ELG', 'LRG', 'QSO'])
-    parser.add_argument('--region', type=str, required=False, default='NGC', choices=['NGC', 'SGC', 'NS', 'SS'])
+    parser.add_argument('--region', type=str, required=False, default='NGC', choices=['NGC', 'SGC', 'N', 'S'])
     parser.add_argument('--completeness', type=str, required=False, default='', choices=['', 'complete_'])
-    parser.add_argument('--todo', type=str, required=False, default='power', choices=['power', 'corr', 'window', 'wmatrix', 'counter'])
+    parser.add_argument('--todo', type=str, required=False, default='power', choices=['power', 'corr', 'window', 'wmatrix', 'counter', 'zcosmo', ''])
     parser.add_argument('--imock', type=int, required=False, default=0)
     parser.add_argument('--fc', type=str, required=False, default='', choices=['', '_fc'])
     parser.add_argument('--rp_cut', type=float, required=False, default=0)
@@ -177,7 +208,7 @@ def main():
         
     zrange = {'ELG': (0.8, 1.6), 'LRG':(0.4, 1.1), 'QSO':(0.8, 3.5)}
     
-    data, randoms = select_data(imock=imock, tracer=tracer, region=region, completeness=completeness, zrange=zrange[tracer])
+    data, randoms = select_data(imock=imock, tracer=tracer, region=region, completeness=completeness, zrange=zrange[tracer], add_zcosmo=(todo=='zcosmo'))
     mpicomm = data.mpicomm
    
     # Output
@@ -187,17 +218,17 @@ def main():
     t0 = time.time()
 
     if todo=='power':
-        output_fn = 'power_spectra/power_spectrum_mock{:d}_{}_{}{}{}_th{:.1f}_directedges_max5000.npy'.format(imock, tracer, completeness, region, '_zcut' if completeness else '', rp_cut)
+        output_fn = 'power_spectra/power_spectrum_mock{:d}_{}_{}{}{}{}.npy'.format(imock, tracer, completeness, region, '_zcut' if completeness else '', '_th{:.1f}_directedges_max5000'.format(rp_cut) if rp_cut else '')
         edges = {'step': 0.005}
         direct_edges = {'step': 0.1, 'max': 5000.}
         print('Compute power spectrum')
-        os.environ['OMP_NUM_THREADS'] = '4'
+        #os.environ['OMP_NUM_THREADS'] = '4'
         compute_power(data, randoms, edges, output_dir+output_fn, th=rp_cut, direct_edges=direct_edges)
         
     if todo=='corr':
         # rp threshold
         th = 0
-        output_fn = 'corr_func_mock{:d}_{}_{}{}_th{:.1f}_test.npy'.format(imock, tracer, completeness, region, th)
+        output_fn = 'corr_func_mock{:d}_{}_{}.npy'.format(imock, tracer, completeness)
         edges = (np.linspace(0., 200., 201), np.linspace(-1, 1, 401))
         print('Compute correlation function')
         xi = TwoPointCorrelationFunction('smu', edges,
@@ -208,19 +239,21 @@ def main():
                                         nthreads=64, mpicomm=mpicomm)
         xi.save(output_dir+output_fn)
         
-    boxsizes = [200000, 50000, 20000]
-    #boxsizes = [20000]
-    power_fn = 'power_spectra/power_spectrum_mock{:d}_{}_{}{}{}.npy'.format(imock, tracer, completeness, region, '_zcut' if completeness else '')
-    randoms_positions = get_rdd(randoms)
-    power = CatalogFFTPower.load(output_dir+power_fn).poles
-    direct = False
-    
-    if direct:
-        direct_edges = {'step': 0.1, 'max': 5000.}
-        direct_selection_attrs = {'rp': (0, rp_cut)}
-    else:
-        direct_edges = None
-        direct_selection_attrs = None
+    if todo in ['window', 'wmatrix']:
+        
+        boxsizes = [200000, 50000, 20000]
+        #boxsizes = [20000]
+        power_fn = 'power_spectra/power_spectrum_mock{:d}_{}_{}{}{}.npy'.format(imock, tracer, completeness, region, '_zcut' if completeness else '')
+        randoms_positions = get_rdd(randoms)
+        power = CatalogFFTPower.load(output_dir+power_fn).poles
+        direct = False
+
+        if direct:
+            direct_edges = {'step': 0.1, 'max': 5000.}
+            direct_selection_attrs = {'rp': (0, rp_cut)}
+        else:
+            direct_edges = None
+            direct_selection_attrs = None
     
     if todo == 'window':
         print('Compute window function')        

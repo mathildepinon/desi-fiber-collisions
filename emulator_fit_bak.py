@@ -163,60 +163,19 @@ def get_fit_setup(tracer, theory_name='velocileptors'):
     return zlim, b0, klim, slim
 
 
-def get_fit_setup(tracer, theory_name='velocileptors'):
-    ells = (0, 2, 4)
-    if 'bao' in theory_name: ells = (0, 2)
-    if tracer.startswith('BGS'):
-        z = 0.3
-        b0 = 1.34
-        smin, kmax = 35., 0.15
-        if 'bao' in theory_name: smin, kmax = 40., 0.3
-        klim = {ell: [0.03, kmax, 0.005] for ell in ells}
-        slim = {ell: [smin, 150., 4.] for ell in ells}
-    if tracer.startswith('LRG'):
-        z = 0.8
-        b0 = 1.7
-        smin, kmax = 30., 0.17
-        if 'bao' in theory_name: smin, kmax = 40., 0.3
-        klim = {ell: [0.03, kmax, 0.005] for ell in ells}
-        slim = {ell: [smin, 150., 4.] for ell in ells}
-    if tracer.startswith('ELG'):
-        z = 1.1
-        b0 = 0.84
-        smin, kmax = 25., 0.2
-        if 'bao' in theory_name: smin, kmax = 40., 0.3
-        klim = {ell: [0.05, kmax, 0.005] for ell in ells}
-        slim = {ell: [smin, 150., 4.] for ell in ells}
-    if tracer.startswith('QSO'):
-        z = 1.4
-        b0 = 1.2
-        smin, kmax = 20., 0.25
-        if 'bao' in theory_name: smin, kmax = 40., 0.3
-        klim = {ell: [0.03, kmax, 0.005] for ell in ells}
-        slim = {ell: [smin, 150., 4.] for ell in ells}
-    return z, b0, klim, slim
-
-
-def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_name='velocileptors', solve=True, fc=False, rp_cut=0, direct=True, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), footprint_fn=os.path.join('.', 'footprint_{}{}.npy'), imock=None, kobsmax=0.2):
+def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_name='velocileptors', solve=True, fc=False, rp_cut=0, direct=True, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), footprint_fn=os.path.join('.', 'footprint_{}.npy'), imock=None, kobsmax=0.2):
 
     from desilike.theories.galaxy_clustering import LPTVelocileptorsTracerPowerSpectrumMultipoles, PyBirdTracerPowerSpectrumMultipoles
     from desilike.observables.galaxy_clustering import TracerPowerSpectrumMultipolesObservable, ObservablesCovarianceMatrix, CutskyFootprint
     from desilike.likelihoods import ObservablesGaussianLikelihood
     
     print('footprint')
-    footprint_fn = footprint_fn.format('complete_', tracer)
+    footprint_fn = footprint_fn.format(tracer)
     if not os.path.isfile(footprint_fn):
         footprint = get_footprint(tracer=tracer, region=region, completeness=completeness)
         footprint.save(footprint_fn)
     else:
         footprint = CutskyFootprint.load(footprint_fn)
-    
-    z, b0, klim, slim = get_fit_setup(tracer, theory_name=theory_name)
-    for lim in klim.values():
-        lim[1] = kobsmax
-    from cosmoprimo.fiducial import DESI
-    fiducial = DESI()
-    b1E = b0 / fiducial.growth_factor(z)
     
     # Load theory
     theory = get_theory(theory_name=theory_name, observable_name='power', template=None, b1E=b1E, ells=klim.keys())
@@ -225,7 +184,6 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
             raise ValueError('No need to build an emulator for the BAO model!')
         emulator_fn = None
 
-    template_name = 'bao' if theory_name == 'dampedbao' else 'shapefit'
     template = get_template(template_name=template_name, z=z, klim=(klim[0][0], klim[0][1] + 1e-5, klim[0][2]))
     if save_emulator or emulator_fn is None or not os.path.isfile(emulator_fn):  # No emulator available (yet)
         theory.init.update(template=template)
@@ -233,6 +191,28 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
         from desilike.emulators import EmulatedCalculator
         calculator = EmulatedCalculator.load(emulator_fn)
         theory.init.update(pt=calculator)
+    
+    kwargs = {}
+    if 'bird' in theory_name:
+        kwargs['eft_basis'] = 'westcoast'
+        Theory = PyBirdTracerPowerSpectrumMultipoles
+    else:
+        Theory = LPTVelocileptorsTracerPowerSpectrumMultipoles
+    
+    if emulator_fn is not None:
+        emulator_fn = emulator_fn.format(theory_name)
+
+    if save_emulator or emulator_fn is None:
+        from desilike.theories.galaxy_clustering import StandardPowerSpectrumTemplate, ShapeFitPowerSpectrumTemplate
+        #template = StandardPowerSpectrumTemplate(z=1.1)
+        z = {'ELG': 1.1, 'LRG': 0.8, 'QSO': 1.4}
+        template = ShapeFitPowerSpectrumTemplate(z=z[tracer])
+        theory = Theory(template=template, **kwargs)
+    else:
+        from desilike.emulators import EmulatedCalculator
+        pt = EmulatedCalculator.load(emulator_fn)
+        theory = Theory(pt=pt, **kwargs)
+        #for param in theory.params.select(basename=['alpha4', 'sn4*', 'al4_*']): param.update(fixed=True)
     
     from pypower import BaseMatrix
     wmatrix = BaseMatrix.load(os.path.join(data_dir, 'windows/wm_mock0_{}_{}{}{}{}.npy'.format(tracer, completeness, region, '_rp{:.1f}'.format(rp_cut) if (rp_cut and not fc) else '', '_directedges_max5000' if rp_cut and direct else '')))
@@ -254,6 +234,13 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
         fiber_collisions = TopHatFiberCollisionsPowerSpectrumMultipoles(Dfc=rp_cut, with_uncorrelated=False)
     else:
         fiber_collisions = None
+
+    if tracer=='ELG':
+        klim={0: [0.02, kobsmax, 0.005], 2: [0.02, kobsmax, 0.005], 4: [0.02, kobsmax, 0.005]}
+    if tracer=='LRG':
+        klim={0: [0.02, 0.15, 0.005], 2: [0.02, 0.15, 0.005], 4: [0.02, 0.15, 0.005]}
+    if tracer=='QSO':
+        klim={0: [0.02, 0.25, 0.005], 2: [0.02, 0.25, 0.005], 4: [0.02, 0.25, 0.005]}
         
     #data = np.load(os.path.join(data_dir, 'wt_{}_{}{}{}{}.npy'.format(tracer, completeness, region, '_zcut' if completeness else '', '_th{:.1f}'.format(rp_cut) if rp_cut else '')))
             
@@ -266,10 +253,10 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
     covariance = ObservablesCovarianceMatrix(observable, footprints=footprint, resolution=5)
     cov = covariance(b1=0.2)
     likelihood = ObservablesGaussianLikelihood(observables=[observable], covariance=cov)
-    #likelihood.all_params['b1'].update(ref={'limits': [0.25, 0.35]})
+    likelihood.all_params['b1'].update(ref={'limits': [0.25, 0.35]})
     #likelihood.all_params['b2'].update(ref={'limits': [0.45, 0.55]})
     if solve and not save_emulator:
-        for param in likelihood.all_params.select(basename=['alpha*', 'sn*', 'c*', 'al*']): param.update(derived='.auto')
+        for param in likelihood.all_params.select(name=['alpha*', 'sn*', 'c*']): param.update(derived='.auto')
         theory.log_info('Use analytic marginalization for {}.'.format(theory.params.names(solved=True)))
     for param in likelihood.all_params.select(basename=['alpha6']):
         param.update(fixed=True)
@@ -283,39 +270,32 @@ def get_power_likelihood(tracer='ELG', region='NGC', completeness='', theory_nam
     return likelihood
 
 
-def get_corr_likelihood(tracer='ELG', region='NGC', completeness='', theory_name='velocileptors', solve=True, fc=False, rp_cut=0, save_emulator=False, emulator_fn=os.path.join('.', 'corr_{}.npy'), footprint_fn=os.path.join('.', 'footprint_{}{}.npy'), imock=None):
+def get_corr_likelihood(tracer='ELG', region='NGC', completeness='', theory_name='velocileptors', solve=True, fc=False, rp_cut=0, save_emulator=False, emulator_fn=os.path.join('.', 'corr_{}.npy'), imock=None):
     
     from desilike.theories.galaxy_clustering import LPTVelocileptorsTracerCorrelationFunctionMultipoles, PyBirdTracerCorrelationFunctionMultipoles
-    from desilike.observables.galaxy_clustering import TracerCorrelationFunctionMultipolesObservable, ObservablesCovarianceMatrix, CutskyFootprint
+    from desilike.observables.galaxy_clustering import TracerCorrelationFunctionMultipolesObservable, ObservablesCovarianceMatrix
     from desilike.likelihoods import ObservablesGaussianLikelihood
 
-    print('footprint')
-    footprint_fn = footprint_fn.format('complete_', tracer)
-    if not os.path.isfile(footprint_fn):
-        footprint = get_footprint(tracer=tracer, region=region, completeness=completeness)
-        footprint.save(footprint_fn)
+    footprint = get_footprint(tracer=tracer, region=region, completeness=completeness)
+
+    kwargs = {}
+    if 'bird' in theory_name:
+        kwargs['eft_basis'] = 'westcoast'
+        Theory = PyBirdTracerCorrelationFunctionMultipoles
     else:
-        footprint = CutskyFootprint.load(footprint_fn)
+        Theory = LPTVelocileptorsTracerCorrelationFunctionMultipoles
+    emulator_fn = emulator_fn.format(theory_name)
 
-    z, b0, klim, slim = get_fit_setup(tracer, theory_name=theory_name)
-    from cosmoprimo.fiducial import DESI
-    fiducial = DESI()
-    b1E = b0 / fiducial.growth_factor(z)
-    # Load theory
-    theory = get_theory(theory_name=theory_name, observable_name='corr', template=None, b1E=b1E, ells=klim.keys())
-    if 'bao' in theory_name:
-        if save_emulator:
-            raise ValueError('No need to build an emulator for the BAO model!')
-        emulator_fn = None
+    if save_emulator or emulator_fn is None:
+        from desilike.theories.galaxy_clustering import StandardPowerSpectrumTemplate, ShapeFitPowerSpectrumTemplate
+        z = {'ELG': 1.1, 'LRG': 0.8, 'QSO': 1.4}
+        template = ShapeFitPowerSpectrumTemplate(z=z[tracer])
 
-    template_name = 'bao' if theory_name == 'dampedbao' else 'shapefit'
-    template = get_template(template_name=template_name, z=z, klim=(klim[0][0], klim[0][1] + 1e-5, klim[0][2]))
-    if save_emulator or emulator_fn is None or not os.path.isfile(emulator_fn):  # No emulator available (yet)
-        theory.init.update(template=template)
-    else:  # Load emulator
+        theory = Theory(template=template, **kwargs)
+    else:
         from desilike.emulators import EmulatedCalculator
-        calculator = EmulatedCalculator.load(emulator_fn)
-        theory.init.update(pt=calculator)
+        pt = EmulatedCalculator.load(emulator_fn)
+        theory = Theory(pt=pt, **kwargs)
         
     if fc:
         from desilike.observables.galaxy_clustering import FiberCollisionsCorrelationFunctionMultipoles, TopHatFiberCollisionsCorrelationFunctionMultipoles
@@ -329,6 +309,10 @@ def get_corr_likelihood(tracer='ELG', region='NGC', completeness='', theory_name
     else:
         fiber_collisions = None
 
+    if tracer=='ELG':
+        slim={0: [25., 150., 4.], 2: [25., 150., 4.], 4: [25., 150., 4.]}
+    if tracer=='LRG':
+        slim={0: [30., 150., 4.], 2: [30., 150., 4.], 4: [30., 150., 4.]}
     observable = TracerCorrelationFunctionMultipolesObservable(slim=slim,
                                                                data=os.path.join(data_dir, 'correlation_functions/corr_func_mock{}_{}_{}{}{}.npy'.format(imock if imock is not None else '*', tracer, completeness, region, '_th{:.1f}'.format(rp_cut) if rp_cut else '')),
                                                                fiber_collisions=fiber_collisions,
@@ -337,10 +321,10 @@ def get_corr_likelihood(tracer='ELG', region='NGC', completeness='', theory_name
     covariance = ObservablesCovarianceMatrix(observable, footprints=footprint, resolution=5)
     cov = covariance(b1=0.2)
     likelihood = ObservablesGaussianLikelihood(observables=[observable], covariance=cov)
-    #likelihood.all_params['b1'].update(ref={'limits': [0.25, 0.35]})
+    likelihood.all_params['b1'].update(ref={'limits': [0.25, 0.35]})
     #likelihood.all_params['b2'].update(ref={'limits': [0.45, 0.55]})
     if solve and not save_emulator:
-        for param in likelihood.all_params.select(basename=['alpha*', 'sn*', 'c*', 'al*']): 
+        for param in likelihood.all_params.select(name=['alpha*', 'sn*', 'c*']): 
             param.update(derived='.auto')
         theory.log_info('Use analytic marginalization for {}.'.format(theory.params.names(solved=True)))
     for param in likelihood.all_params.select(basename=['alpha6']): 
@@ -368,7 +352,7 @@ if __name__ == '__main__':
     parser.add_argument('--todo', type=str, required=False, default='emulator', choices=['emulator', 'profiling', 'sampling', 'importance'])
     parser.add_argument('--corr', type=bool, required=False, default=False, choices=[True, False])
     parser.add_argument('--power', type=bool, required=False, default=False, choices=[True, False])
-    parser.add_argument('--theory_name', type=str, required=False, default='velocileptors', choices=['pybird', 'velocileptors', 'dampedbao'])
+    parser.add_argument('--theory_name', type=str, required=False, default='velocileptors', choices=['pybird', 'velocileptors'])
     parser.add_argument('--fc', type=str, required=False, default='', choices=['', '_fc'])
     parser.add_argument('--rp_cut', type=float, required=False, default=0)
     parser.add_argument('--direct', type=bool, required=False, default=True)
@@ -387,10 +371,9 @@ if __name__ == '__main__':
     direct = args.direct
     imock = args.imock
     
-    theory_dir = 'bao' if 'bao' in args.theory_name else ''
-    emulator_dir = os.path.join(data_dir, theory_dir, 'emulators', 'emulators_shapefit_{}'.format(tracer))
-    profiles_dir = os.path.join(data_dir, theory_dir, 'profiles', 'profiles_shapefit_{}_{}{}'.format(tracer, completeness, region))
-    chains_dir = os.path.join(data_dir, theory_dir, 'chains', 'chains_shapefit_{}_{}{}'.format(tracer, completeness, region))
+    emulator_dir = os.path.join(data_dir, 'emulators/emulators_shapefit_{}'.format(tracer))
+    profiles_dir = os.path.join(data_dir, 'profiles/profiles_shapefit_{}_{}{}'.format(tracer, completeness, region))
+    chains_dir = os.path.join(data_dir, 'chains/chains_shapefit_{}_{}{}'.format(tracer, completeness, region))
     
     if 'emulator' in todo:
         if power: get_power_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, save_emulator=True, emulator_fn=os.path.join(emulator_dir, 'power_xinmax0.35_{}.npy'))
@@ -400,15 +383,15 @@ if __name__ == '__main__':
         from desilike.profilers import MinuitProfiler
         
         if power:
-            likelihood = get_power_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, solve=True, fc=fc,  rp_cut=rp_cut, direct=direct, emulator_fn=os.path.join(emulator_dir, 'power_xinmax0.35_{}.npy'), imock=imock)
+            likelihood = get_power_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, solve=False, fc=fc,  rp_cut=rp_cut, direct=direct, emulator_fn=os.path.join(emulator_dir, 'power_xinmax0.35_{}.npy'), imock=imock)
             profiler = MinuitProfiler(likelihood, seed=43, save_fn=os.path.join(profiles_dir, 'power{}_xinmax0.35_{}{}{}{}.npy'.format('_mock{}'.format(imock) if imock is not None else '', theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '', '_directedges_max5000' if rp_cut and direct else '')))
-            profiler.maximize(niterations=1)
+            profiler.maximize(niterations=10)
             #print(profiler.profiles.to_stats(tablefmt='pretty'))
         
         if corr:
-            likelihood = get_corr_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, solve=True, fc=fc, rp_cut=rp_cut, emulator_fn=os.path.join(emulator_dir, 'corr_{}.npy'), imock=imock)
+            likelihood = get_corr_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, solve=False, fc=fc, rp_cut=rp_cut, emulator_fn=os.path.join(emulator_dir, 'corr_{}.npy'), imock=imock)
             profiler = MinuitProfiler(likelihood, seed=43, save_fn=os.path.join(profiles_dir, 'corr{}_{}{}{}.npy'.format('_mock{}'.format(imock) if imock is not None else '', theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '')))
-            profiler.maximize(niterations=1)
+            profiler.maximize(niterations=10)
      
     if 'sampling' in todo:
         from desilike.samplers import EmceeSampler
@@ -421,7 +404,7 @@ if __name__ == '__main__':
         if corr:
             likelihood = get_corr_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, fc=fc, rp_cut=rp_cut, emulator_fn=os.path.join(emulator_dir, 'corr_{}.npy'), imock=imock)
             chains_path  = os.path.join(chains_dir, 'corr_{}{}{}_{}*.npy'.format(theory_name, fc, '_th{:.1f}'.format(rp_cut) if rp_cut else '', 'mock{}_'.format(imock) if imock is not None else ''))
-            sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, save_fn=chains_path)
+            sampler = EmceeSampler(likelihood, chains=chains_path, nwalkers=40, save_fn=chains_path)
             sampler.run(check={'max_eigen_gr': 0.02})
             
     if 'importance' in args.todo:
