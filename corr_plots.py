@@ -12,7 +12,7 @@ from pycorr.twopoint_estimator import project_to_wedges
 
 class mock:
     
-    def __init__(self, mock_id, footprint, tracer, tr=1, rebin=(1, 1)):
+    def __init__(self, mock_id, footprint, tracer, tr=1, rebin=(1, 1), rp_threshold=0):
         ext=".npy"
         special = ""
         #xi_dir = "/global/cfs/cdirs/desi/users/eburtin/"
@@ -26,6 +26,13 @@ class mock:
         self.xi_complete_mp = project_to_multipoles(self.xi_complete_smu)
         self.xi_mp_tr = project_to_multipoles(self.xi_smu[:, tr:-tr])
         self.xi_complete_mp_tr = project_to_multipoles(self.xi_complete_smu[:, tr:-tr])
+        
+        self.rp_threshold = rp_threshold
+        self.xi_rpcut = TwoPointCorrelationFunction.load(xi_dir+xi_fn.format('')+'_th{:.1f}'.format(rp_threshold)+ext)[::rebin[0],::rebin[1]]
+        self.xi_complete_rpcut = TwoPointCorrelationFunction.load(xi_dir+xi_fn.format('complete_')+'_th{:.1f}'.format(rp_threshold)+ext)[::rebin[0],::rebin[1]]
+        self.xi_mp_rpcut = project_to_multipoles(self.xi_rpcut, ignore_nan=True)
+        self.xi_complete_mp_rpcut = project_to_multipoles(self.xi_complete_rpcut, ignore_nan=True)
+
    
     def plot(self):
         color=['dodgerblue', 'orangered', 'darkcyan', 'firebrick', 'violet', 'olivedrab', 'gold', 'limegreen', 'darkorange', 'darkviolet', 'deepskyblue']
@@ -37,7 +44,7 @@ class mock:
 
 def get_average_multipole(mocks, iell):
     nmocks = len(mocks)
-    names = ['xi_mp', 'xi_complete_mp', 'xi_mp_tr', 'xi_complete_mp_tr']
+    names = ['xi_mp', 'xi_complete_mp', 'xi_mp_tr', 'xi_complete_mp_tr', 'xi_mp_rpcut', 'xi_complete_mp_rpcut']
     res = dict()
     for name in names:
         mocks_xis = np.array([getattr(mocks[i], name)[1][iell] for i in range(nmocks)])
@@ -48,45 +55,49 @@ def get_average_multipole(mocks, iell):
 
 
 def plot_fiber_collisions(mocks, mp, max_vals=None):
-    names = ['xi_mp', 'xi_complete_mp', 'xi_mp_tr', 'xi_complete_mp_tr']
-    labels = {'xi_mp': 'FA', 'xi_complete_mp': 'Complete', 'xi_mp_tr': r'FA, $\mu$-truncated', 'xi_complete_mp_tr': r'Complete, $\mu$-truncated'}
-    linestyles = {'xi_mp': ':', 'xi_complete_mp': '-', 'xi_mp_tr': ':', 'xi_complete_mp_tr': '-'}
-    alphas = {'xi_mp': 1., 'xi_complete_mp': 1., 'xi_mp_tr': 0.4, 'xi_complete_mp_tr': 0.4}
+    names = ['xi_mp', 'xi_complete_mp', 'xi_mp_tr', 'xi_complete_mp_tr', 'xi_mp_rpcut', 'xi_complete_mp_rpcut']
+    rp_threshold = mocks[0].rp_threshold
+    labels = {'xi_mp': 'FA (no cut)', 'xi_complete_mp': 'Complete (no cut)', 
+              'xi_mp_tr': r'FA, $\mu$-truncated', 'xi_complete_mp_tr': r'Complete, $\mu$-truncated',
+              'xi_mp_rpcut': r'FA, cutting $r_p < {} \; \mathrm{{Mpc}}/h$'.format(rp_threshold), 'xi_complete_mp_rpcut': r'Complete, cutting $r_p < {} \; \mathrm{{Mpc}}/h$'.format(rp_threshold)}
+    linestyles = {'xi_mp': ':', 'xi_complete_mp': '-', 'xi_mp_tr': ':', 'xi_complete_mp_tr': '-', 'xi_mp_rpcut': ':', 'xi_complete_mp_rpcut': '-'}
+    alphas = {'xi_mp': 1., 'xi_complete_mp': 1., 'xi_mp_tr': 0.2, 'xi_complete_mp_tr': 0.2, 'xi_mp_rpcut': 0.4, 'xi_complete_mp_rpcut': 0.4}
 
     power = 2
     r = mocks[0].xi_mp[0]
     
-    fig,axs = plt.subplots(1, 3, figsize=(16, 4))
+    fig,axs = plt.subplots(1, 3, figsize=(13, 4), sharey=True)
     color=['dodgerblue', 'orangered', 'darkcyan', 'firebrick', 'violet', 'olivedrab', 'gold', 'limegreen', 'darkorange', 'darkviolet', 'deepskyblue']
 
     for i, ell in enumerate(mp):
         avg_mp = get_average_multipole(mocks, i)
-        for name in names:
+        for name in ['xi_mp', 'xi_complete_mp', 'xi_mp_rpcut', 'xi_complete_mp_rpcut']:
             res, std = avg_mp[name]
             lab = labels[name]
             axs[i].plot(r, r**power*res, color=color[i], ls=linestyles[name], alpha=alphas[name])
             axs[i].plot([], [], label=lab, color='black', ls=linestyles[name], alpha=alphas[name])
 
         axs[i].set_xlabel('$r$ [Mpc/$h$]')
-        axs[i].set_title(r'$\ell$={:d}'.format(ell))
+        axs[i].set_title(r'$\ell={:d}$'.format(ell))
     axs[0].set_ylabel(r'$r^2 \xi_\ell$ [$(\mathrm{Mpc}/h)^{2}$]')
     axs[0].legend()
     
     
 def plot_delta_fiber_collisions(mocks, mp, max_vals=None):
-    names = ['xi_mp', 'xi_mp_tr']
-    labels = {'xi_mp': 'FA - complete', 'xi_mp_tr': r'FA - complete, $\mu$-truncated'}
-    linestyles = {'xi_mp': '-', 'xi_mp_tr': ':'}
+    names = ['xi_mp', 'xi_mp_tr', 'xi_mp_rpcut']
+    rp_threshold = mocks[0].rp_threshold
+    labels = {'xi_mp': 'No cut', 'xi_mp_tr': r'FA - complete, $\mu$-truncated', 'xi_mp_rpcut':  'Cutting $r_p < {} \; \mathrm{{Mpc}}/h$'.format(rp_threshold)}
+    linestyles = {'xi_mp': '-', 'xi_mp_tr': ':', 'xi_mp_rpcut': '--'}
 
     power = 2
     r = mocks[0].xi_mp[0]
     
-    fig,axs = plt.subplots(1, 3, figsize=(16, 4))
+    fig,axs = plt.subplots(1, 3, figsize=(13, 4), sharey=True)
     color=['dodgerblue', 'orangered', 'darkcyan', 'firebrick', 'violet', 'olivedrab', 'gold', 'limegreen', 'darkorange', 'darkviolet', 'deepskyblue']
 
     for i, ell in enumerate(mp):
         avg_mp = get_average_multipole(mocks, i)
-        for tr in ['', '_tr']:
+        for tr in ['', '_rpcut']:
             name = 'xi_mp{}'.format(tr)
             name_complete = 'xi_complete_mp{}'.format(tr)
             res, std = avg_mp[name]
@@ -94,11 +105,11 @@ def plot_delta_fiber_collisions(mocks, mp, max_vals=None):
             lab = labels[name]
             axs[i].plot(r, r**power*(res - res_c), color=color[i], ls=linestyles[name])
             axs[i].plot([], [], label=lab, color='black', ls=linestyles[name])
-            if name == 'xi_mp_tr':
-                axs[i].fill_between(r, -std*r**power/np.sqrt(len(mocks)), std*r**power/np.sqrt(len(mocks)),label=r'$<\sigma_\mathrm{{Y1}}>/{:.0f}$'.format(np.sqrt(len(mocks))), facecolor='grey', alpha=0.1)
+            if name == 'xi_mp_rpcut':
+                axs[i].fill_between(r, -std*r**power/np.sqrt(len(mocks)), std*r**power/np.sqrt(len(mocks)),label=r'$\sigma_\mathrm{{Y1}}/{:.0f}$'.format(np.sqrt(len(mocks))), facecolor='grey', alpha=0.1)
 
         axs[i].set_xlabel('$r$ [Mpc/$h$]')
-        axs[i].set_title(r'$\ell$={:d}'.format(ell))
+        axs[i].set_title(r'$\ell={:d}$'.format(ell))
     axs[0].set_ylabel(r'$r^2 \Delta \xi_\ell$ [$(\mathrm{Mpc}/h)^{2}$]')
     axs[0].legend()
 
