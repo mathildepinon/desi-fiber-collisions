@@ -1,0 +1,12 @@
+**/__pycache__
+**/pytest_cache
+**/*.egg
+**/*.egg-info
+**/.astropy
+**/.cache
+**/.config
+**/.wget*
+**/dist
+**/eggs
+**/build
+**/.ipynb_checkpoints
