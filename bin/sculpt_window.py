@@ -160,16 +160,16 @@ def rotate_data(data_type, tracer, region, rp_cut, zrange, version='v0.4', ells=
         zmax = zrange[1]
         #window_fn = os.path.join(output_dir, "sculpt_window/", "wmatrix_{}_complete_{}{}_ells{}{}.npy".format(tracer, region, '_rp{:.1f}'.format(rpcut) if rpcut else '', ''.join([str(i) for i in ells]), '' if highres else '_lowres'))
         resinfo = '_nran{:d}_cellsize{:d}_boxsize{:d}'.format(nran, cellsize, boxsize) if version=='test' else ''       
-        window_fn = os.path.join(output_dir, 'wmatrix_smooth_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10.npy'.format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
+        window_fn = os.path.join(output_dir, 'wmatrix_smooth_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10_losstest.npy'.format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
         wmatrixnew.save(window_fn)
-        Mopt_fn = os.path.join(output_dir, 'mmatrix_smooth_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10.npy'.format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
+        Mopt_fn = os.path.join(output_dir, 'mmatrix_smooth_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10_losstest.npy'.format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
         np.save(Mopt_fn, np.array(Mopt[0], dtype="float64"))
-        mo_fn = os.path.join(output_dir, 'mo_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10.npy'.format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
+        mo_fn = os.path.join(output_dir, 'mo_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10_losstest.npy'.format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
         np.save(mo_fn, mo)
         #power_fn = os.path.join(output_dir, "sculpt_window/", "pkpoles_{}_complete_{}{}_ells{}{}.npy".format(tracer, region, '_rp{:.1f}'.format(rpcut) if rpcut else '', ''.join([str(i) for i in ells]), '' if highres else '_lowres'))
-        power_fn = os.path.join(output_dir, "pkpoles_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10.npy".format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
+        power_fn = os.path.join(output_dir, "pkpoles_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10_losstest.npy".format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
         np.save(power_fn, pknew)
-        cov_fn = os.path.join(output_dir, "cov_{}_complete_{}_{:.1f}_{:.1f}{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10.npy".format(tracer, region, zmin, zmax, resinfo, '_rp{:.1f}'.format(rpcut) if rpcut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
+        cov_fn = os.path.join(output_dir, "cov_{}_complete_{}_{:.1f}_{:.1f}{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10_losstest.npy".format(tracer, region, zmin, zmax, resinfo, '_rp{:.1f}'.format(rpcut) if rpcut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
         np.save(cov_fn, covnew)
 
     return datanew
@@ -205,7 +205,7 @@ if __name__ == '__main__':
     cellsize = 6
     boxsize = 7000
     covtype = "analytic"
-    ktmax = 1
+    ktmax = 0.5
 
     rotate_data(data_type, tracer, region, rp_cut=rpcut, zrange=zrange, ells=ls, version=version, kolim=kolim, korebin=korebin, ktmax=ktmax, ktrebin=ktrebin, covtype=covtype, save=True, nran=nran, cellsize=cellsize, boxsize=boxsize)
 
