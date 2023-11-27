@@ -204,7 +204,7 @@ def get_power_likelihood(data_type="Y1secondgenmocks", tracer='ELG', region='NGC
         emulator_fn = None
 
     template_name = 'bao' if theory_name == 'dampedbao' else 'shapefitqisoqap'
-    template = get_template(template_name=template_name, z=z, klim=(klim[0][0], klim[0][1] + 1e-5, klim[0][2]))
+    template = get_template(template_name=template_name, z=z, klim=(klim[0][0], klim[0][1], klim[0][2]))
     if emulator_fn is not None:
         emulator_fn = emulator_fn.format(theory_name)
     if save_emulator or emulator_fn is None or not os.path.isfile(emulator_fn):  # No emulator available (yet)
@@ -224,12 +224,12 @@ def get_power_likelihood(data_type="Y1secondgenmocks", tracer='ELG', region='NGC
         wmatrix_fn = naming(filetype='wm', data_type=data_type, imock=None if data_type=='Y1secondgenmocks' else 0, tracer=tracer, completeness=completeness, region=region, rpcut=rp_cut, thetacut=theta_cut, direct_edges=(bool(rp_cut) or bool(theta_cut)) and direct)
         wmatrix = BaseMatrix.load(os.path.join(data_dir, 'windows', wmatrix_fn.format('')))
         #wmatrix = BaseMatrix.load(wmatrix_fn.format(''))
-        kinrebin = 10
-        wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // kinrebin * kinrebin, kinrebin))
         if tracer == 'QSO':
             wmatrix.select_x(xinlim=(0.005, 0.30))
         else:
             wmatrix.select_x(xinlim=(0.005, 0.35))
+        kinrebin = 10
+        wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // kinrebin * kinrebin, kinrebin))
             
     if fc:
         from desilike.observables.galaxy_clustering import FiberCollisionsPowerSpectrumMultipoles, TopHatFiberCollisionsPowerSpectrumMultipoles
@@ -260,35 +260,37 @@ def get_power_likelihood(data_type="Y1secondgenmocks", tracer='ELG', region='NGC
         mmatrix_fn = os.path.join(sculpt_dir, 'mmatrix_smooth_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}_ells{}_analyticcov_ktmax{}_autokwid_capsig5_difflfac10.npy'.format(tracer, region, 0.8, 1.6, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), ktmax))
         mmatrix = np.load(mmatrix_fn)
         
-        mo_fn = os.path.join(sculpt_dir, 'mo_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}_ells{}_analyticcov_ktmax{}_autokwid_capsig5_difflfac10.npy'.format(tracer, region, 0.8, 1.6, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), ktmax))
-        mo = np.load(mo_fn)
-        print('mo shape: ', mo.shape)
-        systematic_templates = SystematicTemplatePowerSpectrumMultipoles(templates=[mo[0], mo[1], mo[2]], k=np.arange(0., 0.4, 0.005))
-        
         window_fn = os.path.join(sculpt_dir, 'wmatrix_smooth_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}_ells{}_analyticcov_ktmax{}_autokwid_capsig5_difflfac10.npy'.format(tracer, region, 0.8, 1.6, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), ktmax))
         wmatrix = BaseMatrix.load(window_fn)
         wmatrix.select_x(xinlim=(0.005, 0.35))
         kinrebin = 10
         wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // kinrebin * kinrebin, kinrebin))
-        print('wmatrix shape: ', wmatrix.shape)
-        print('wmatrix kout: ', wmatrix.xout[0])
-        print('wmatrix kin: ', wmatrix.xin[0])
         
         cov_fn = os.path.join(sculpt_dir, "cov_{}_complete_{}_{:.1f}_{:.1f}{}_ells{}_analyticcov_ktmax{}_autokwid_capsig5_difflfac10.npy".format(tracer, region, 0.8, 1.6, '_rp{:.1f}'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), ktmax))
         covnew = np.load(cov_fn)
         
         data_fn = naming(filetype='power', data_type=data_type, imock=imock if imock is not None else '{}', tracer=tracer, completeness=completeness, region=region, rpcut=rp_cut, thetacut=theta_cut, direct_edges=(bool(rp_cut) or bool(theta_cut)) and direct, highres=True) #(data_type=='Y1secondgenmocks'))
         from pypower import CatalogFFTPower
-        data_list = [CatalogFFTPower.load(os.path.join(data_dir, 'pk', data_fn.format(i))).poles.select(klim[0])(ell=ells, complex=False) for i in range(0, 1)]
+        data_list = [CatalogFFTPower.load(os.path.join(data_dir, 'pk', data_fn.format(i))).poles.select((0, 0.4, 0.005))(ell=ells, complex=False) for i in range(0, 25)]
         data_mean = np.mean(data_list, axis=0)
-        mmatrix_trunc = truncate_cov(mmatrix, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*klim[0]))
-        data = np.matmul(mmatrix_trunc, data_mean.flatten())
-        k = CatalogFFTPower.load(os.path.join(data_dir, 'pk', data_fn.format(0))).poles.select(klim[0]).k #wmatrix.xout[0] #np.arange(0., 0.4, 0.005)
-        print('k : ', k)
-        print('wmatrix k : ', wmatrix.xout[0])
-        print('wmatrix nmodes : ', wmatrix.weightsout[0])
-        print('data shape: ', data.shape) 
-        print('k shape: ', k.shape)
+        data = np.matmul(mmatrix, data_mean.flatten())
+        mask = (np.arange(0, 0.4, 0.005) >= klim[0][0]) & (np.arange(0, 0.4, 0.005) < klim[0][1])
+        data = data[np.concatenate((mask, )*len(ells))]
+        #k = CatalogFFTPower.load(os.path.join(data_dir, 'pk', data_fn.format(0))).poles.select((0, 0.4, 0.005)).k[mask] #wmatrix.xout[0] #np.arange(0., 0.4, 0.005)
+        #print('k : ', k)
+        #print('k : ', CatalogFFTPower.load(os.path.join(data_dir, 'pk', data_fn.format(0))).poles.select((0, 0.4, 0.005)).k)
+        #print('wmatrix k : ', wmatrix.xout[0])
+        #print('wmatrix nmodes : ', wmatrix.weightsout[0])
+        #print('data shape: ', data.shape) 
+        #print('k shape: ', k.shape)
+        
+        mo_fn = os.path.join(sculpt_dir, 'mo_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}_ells{}_analyticcov_ktmax{}_autokwid_capsig5_difflfac10.npy'.format(tracer, region, 0.8, 1.6, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), ktmax))
+        mo = np.load(mo_fn)
+        mask_long = np.concatenate((mask, )*len(ells))
+        systematic_templates = SystematicTemplatePowerSpectrumMultipoles(templates=[mo[0][mask_long], mo[1][mask_long], mo[2][mask_long]])
+        systematic_templates.init.params['syst_0'].update(prior=dict(dist='norm', loc=0, scale=2000), derived='.best')
+        systematic_templates.init.params['syst_1'].update(prior=dict(dist='norm', loc=0, scale=100), derived='.best')
+        systematic_templates.init.params['syst_2'].update(prior=dict(dist='norm', loc=0, scale=20), derived='.best')
         
     else:
         systematic_templates = None
@@ -301,9 +303,10 @@ def get_power_likelihood(data_type="Y1secondgenmocks", tracer='ELG', region='NGC
                                                          #k=k,
                                                          ells=ells,
                                                          wmatrix=wmatrix,
+                                                         #kin=wmatrix.xin[0],
                                                          #fiber_collisions=fiber_collisions,
-                                                         theory=theory)
-                                                         #systematic_templates=systematic_templates)
+                                                         theory=theory,
+                                                         systematic_templates=systematic_templates)
     #covariance = ObservablesCovarianceMatrix(observable, footprints=footprint, resolution=5)
     #cov = covariance(b1=0.2)
     covdir = '/global/cfs/cdirs/desi/survey/catalogs/Y1/LSS/iron/LSScats/v0.6/blinded/pk/covariances/v0.1.5'
@@ -313,6 +316,7 @@ def get_power_likelihood(data_type="Y1secondgenmocks", tracer='ELG', region='NGC
     c2_trunc = truncate_cov(c2, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*klim[0]))
     cov = np.linalg.inv(np.linalg.inv(c1_trunc) + np.linalg.inv(c2_trunc))
     if sculpt_window:
+        print('k cov : ', np.arange(*klim[0]))
         covnew_trunc = truncate_cov(covnew, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*klim[0]))
         cov = covnew_trunc
     #cov = truncate_cov(c, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*klim[0]))
@@ -320,7 +324,7 @@ def get_power_likelihood(data_type="Y1secondgenmocks", tracer='ELG', region='NGC
     #likelihood.all_params['b1'].update(ref={'limits': [0.25, 0.35]})
     #likelihood.all_params['b2'].update(ref={'limits': [0.45, 0.55]})
     if solve and not save_emulator:
-        for param in likelihood.all_params.select(basename=['alpha*', 'sn*', 'c*', 'al*']): param.update(derived='.auto')
+        for param in likelihood.all_params.select(basename=['alpha*', 'sn*', 'c*', 'al*']): param.update(derived='.best') # NB: derived='.auto' could shift posterior
         theory.log_info('Use analytic marginalization for {}.'.format(theory.params.names(solved=True)))
     for param in likelihood.all_params.select(basename=['alpha6']):
         param.update(fixed=True)
@@ -333,6 +337,17 @@ def get_power_likelihood(data_type="Y1secondgenmocks", tracer='ELG', region='NGC
         emulator.save(emulator_fn)
     return likelihood
 
+def aprime(cov, mo):
+    print(np.linalg.matrix_rank(cov))
+    a = np.linalg.inv(cov)
+    print(np.linalg.matrix_rank(a))
+    tmp1 = a.dot(mo.T)
+    tmp2 = mo.dot(a)
+    tmp3 = np.linalg.inv(mo.dot(tmp1))
+    print(tmp3)
+    print(np.linalg.matrix_rank(tmp3))
+    print(np.linalg.matrix_rank(tmp1.dot(tmp3).dot(tmp2)))
+    return a - tmp1.dot(tmp3).dot(tmp2)
 
 # Need to be updated
 def get_corr_likelihood(data_type="Y1secondgenmocks", tracer='ELG', region='NGC', completeness='', theory_name='velocileptors', solve=True, fc=False, rp_cut=0, theta_cut=0, direct=True, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), footprint_fn=os.path.join(data_dir, 'footprints', 'footprint_{}{}.npy'), imock=None):
@@ -498,8 +513,8 @@ if __name__ == '__main__':
         from desilike.samplers import EmceeSampler
         
         if power:
-            likelihood = get_power_likelihood(data_type=data_type, tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, fc=fc, rp_cut=rp_cut, theta_cut=theta_cut, direct=direct, emulator_fn=os.path.join(emulator_dir, 'power_{}.npy'), imock=imock)
-            sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=43, save_fn=os.path.join(chains_dir, 'power_{}{}{}{}_{}*.npy'.format(theory_name, fc, cutflag, '_directedges' if (rp_cut or theta_cut) and direct else '', 'mock{}_'.format(imock) if imock is not None else '')))
+            likelihood = get_power_likelihood(data_type=data_type, tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, fc=fc, rp_cut=rp_cut, theta_cut=theta_cut, direct=direct, emulator_fn=os.path.join(emulator_dir, 'power_{}.npy'), imock=imock, sculpt_window=sculpt_window)
+            sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=43, save_fn=os.path.join(chains_dir, 'power_{}{}{}{}_{}{}*.npy'.format(theory_name, fc, cutflag, '_directedges' if (rp_cut or theta_cut) and direct else '', '_sculptwindow_gauspriors2000_100_20' if sculpt_window else '', 'mock{}_'.format(imock) if imock is not None else '')))
             sampler.run(check={'max_eigen_gr': 0.02})
         
         if corr:

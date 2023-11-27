@@ -273,8 +273,8 @@ def main():
     if todo in ['window', 'wmatrix']:
         
         minboxsize = 8000
-        boxsizes = [minboxsize]
-        power_fn = os.path.join(output_dir, 'pk', naming(filetype='power', data_type=data_type, imock=imock, tracer=tracer, completeness=completeness, region=region, cellsize=cellsize, highres=True))
+        boxsizes = [200000, 50000, 10000]
+        power_fn = os.path.join(output_dir, 'pk', naming(filetype='power', data_type=data_type, imock=imock, tracer=tracer, completeness=completeness, region=region, highres=True))
         power = CatalogFFTPower.load(power_fn).poles
         #power_fn = os.path.join('/global/cfs/cdirs/desi/survey/catalogs/Y1/mocks/SecondGenMocks/AbacusSummit/mock{:d}/pk/pkpoles_{}_{}gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}.npy'.format(imock, tracer, completeness, region, zrange[tracer[:3]][0], zrange[tracer[:3]][1], '_rpcut{:.1f}'.format(rp_cut) if rp_cut else ''))
         #power = PowerSpectrumStatistics.load(power_fn)
@@ -299,7 +299,7 @@ def main():
         
         randoms_positions = get_rdd(randoms)
         
-        window_fn = os.path.join(output_dir, 'windows', naming(filetype='window', data_type=data_type, imock=imock, tracer=tracer, completeness=completeness, region=region, cellsize=cellsize, boxsize=None, rpcut=rp_cut, thetacut=theta_cut, direct_edges=direct))
+        window_fn = os.path.join(output_dir, 'windows', naming(filetype='window', data_type=data_type, imock=imock, tracer=tracer, completeness=completeness, region=region, cellsize=None, boxsize=None, rpcut=rp_cut, thetacut=theta_cut, direct_edges=direct))
         #window_fn = os.path.join(output_dir, 'windows', 'window_{}_{}gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{{}}.npy'.format(tracer, completeness, region, zrange[tracer[:3]][0], zrange[tracer[:3]][1], '_rpcut{:.1f}'.format(rp_cut) if rp_cut else ''))
 
     if todo == 'window':
