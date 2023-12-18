@@ -1,119 +1,115 @@
 import os
 import argparse
+from dataclasses import dataclass
 import numpy as np
 import scipy.linalg as sla
+import time
 
 from jax.config import config; config.update('jax_enable_x64', True)
 
-from pypower import BaseMatrix, PowerSpectrumSmoothWindowMatrix, CatalogFFTPower, PowerSpectrumStatistics
+from pypower import BaseMatrix, PowerSpectrumSmoothWindowMatrix, CatalogFFTPower, PowerSpectrumStatistics, PowerSpectrumMultipoles
 import anotherpipe.powerestimation.rotatewindow as rw
 import anotherpipe.powerestimation.powerestimate as pe
 from desipipe.file_manager import BaseFile
 
-from emulator_fit import truncate_cov
+from utils import load_poles
+from cov_utils import truncate_cov, get_EZmocks_covariance
 from wmatrix_utils import compute_wmatrix
+from local_file_manager import LocalFileName
+from desi_file_manager import DESIFileName
 
-highres = True
 
-def get_data(data_type, tracer, region, rp_cut, zrange, version="v0.4", kolim=(0.02, 0.2), korebin=10, ktmax=0.5, ktrebin=10, nran=5, cellsize=8, boxsize=8000, covtype='analytic'):
+@dataclass
+class SculptWindow():
+    """
+    Class to manage saving & loading of input/output for window scultping transformation.
+    
+    Attributes
+    ----------
+    wmatrix : PowerSpectrumSmoothWindowMatrix, default=None
+        Input window matrix.
+        
+    pk : PowerSpectrumStatistics, default=None
+        Input power spectrum.
+        
+    cov : array with shape (N, N), default=None
+        Input covariance matrix.
+        
+    mmatrix : array with shape (N, N), default=None
+        Transformation matrix M.
+
+    mo : array of shape (3, 3N), default=None
+
+    mt : array with shape (3, 3N), default=None
+
+    mt : 1d array with length 3, default=None
+
+    wmatrixnew : PowerSpectrumSmoothWindowMatrix, default=None
+        Transformed window matrix.
+        
+    pknew : array with shape (3, N), default=None
+        Transformed pk.
+
+    covnew : array with shape (N, N), default=None
+        Transformed covariance matrix.
+    """
+    wmatrix: PowerSpectrumSmoothWindowMatrix
+    pk: PowerSpectrumMultipoles
+    cov: np.ndarray
+    mmatrix: np.ndarray
+    mo: np.ndarray
+    mt: np.ndarray
+    m: np.array   
+    wmatrixnew: PowerSpectrumSmoothWindowMatrix
+    pknew: np.ndarray   
+    covnew: np.ndarray
+    
+    def __getstate__(self):
+        state = {}
+        for name in ['cov', 'mmatrix', 'mo', 'mt', 'm', 'pknew', 'covnew']:
+            if hasattr(self, name):
+                state[name] = getattr(self, name)
+        for name in ['wmatrix', 'pk', 'wmatrixnew']:
+            state[name] = getattr(self, name).__getstate__()
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.wmatrix = BaseMatrix.from_state(self.wmatrix)
+        self.pk = PowerSpectrumStatistics.from_state(self.pk)
+        self.wmatrixnew = BaseMatrix.from_state(self.wmatrixnew)
+
+    def save(self, filename):
+        np.save(filename, self.__getstate__(), allow_pickle=True)
+
+    @classmethod
+    def load(cls, filename):
+        state = np.load(filename, allow_pickle=True)[()]
+        new = cls.__new__(cls)
+        new.__setstate__(state)
+        return new
+    
+    
+
+def get_data(source='desi', catalog='second', version='v3', tracer='ELG', region='NGC', completeness=True, rpcut=0, thetacut=0, zrange=None, kolim=(0.02, 0.2), korebin=10, ktmax=0.5, ktrebin=10, nran=None, cellsize=None, boxsize=None, covtype='analytic'):
 
     zmin = zrange[0]
     zmax = zrange[1]
+    
+    if source == 'desi':
+        wm_fn = DESIFileName().set_default_config(version=version, ftype='wmatrix_smooth', tracer=tracer, region=region, completeness=completeness, realization='merged', rpcut=rpcut, thetacut=thetacut)
+        pk_fn = DESIFileName().set_default_config(version=version, ftype='pkpoles', tracer=tracer, region=region, completeness=completeness, rpcut=rpcut, thetacut=thetacut)
 
-    if data_type ==  "y1":
-        data_dir = "/global/cfs/cdirs/desi/survey/catalogs/Y1/LSS/iron/LSScats/{}/blinded/pk".format(version)
-
-        # P(k)
-        if version == "test":
-            pk_fn = os.path.join(data_dir, "pkpoles_{}_{}_z{}-{}_default_FKP_lin_nran{:d}_cellsize{:d}_boxsize{:d}{}.npy".format(tracer, region, zmin, zmax, nran, cellsize, boxsize, '_rpcut{:.1f}'.format(rp_cut) if rp_cut else ''))
-        else:
-            pk_fn = os.path.join(data_dir, "pkpoles_{}_{}_{}_{}_default_FKP_lin{}.npy".format(tracer, region, zmin, zmax, '_rpcut{:.1f}'.format(rp_cut) if rp_cut else ''))
-        pk = PowerSpectrumStatistics.load(pk_fn)
-        pk.select(kolim).slice(slice(0, len(pk.k) // korebin * korebin, korebin)) #rebin(korebin)
-        # Window matrix
-        if version == 'test':
-            wm_fn = os.path.join(data_dir, "wmatrix_smooth_{}_{}_z{}-{}_default_FKP_lin_nran{:d}_cellsize{:d}_boxsize{:d}{}.npy".format(tracer, region, zmin, zmax, nran, cellsize, boxsize, '_rpcut{:.1f}'.format(rp_cut) if rp_cut else ''))
-        else:
-            wm_fn = os.path.join(data_dir, "wmatrix_smooth_{}_{}_{}_{}_default_FKP_lin{}.npy".format(tracer, region, zmin, zmax, '_rpcut{:.1f}'.format(rp_cut) if rp_cut else ''))
-        # else:
-        #     window_fn = os.path.join(data_dir, "window_smooth_{}_{}_{}_{}_default_FKP_lin_{}.npy".format(tracer, region, zmin, zmax, 'rpcut{:.1f}'.format(rp_cut) if rp_cut else ''))
-        #     wm_fn = "/global/cfs/cdirs/desi/users/mpinon/y1/new/sculpt_window/wmatrix_smooth_{}_{}_{}_{}_default_FKP_lin_{}.npy".format(tracer, region, zmin, zmax, 'rpcut{:.1f}'.format(rp_cut) if rp_cut else '')
-        #     if not os.path.isfile(wm_fn):
-        #         wmatrix = compute_wmatrix(BaseFile(window_fn), BaseFile(pk_fn))
-        #         wmatrix.save(wm_fn)
-        #     else:
-        #         wmatrix = PowerSpectrumSmoothWindowMatrix.load(wm_fn)
-        # Covariance
-        if region=="GCcomb": region="NGCSGCcomb"
-        d = "/global/cfs/cdirs/desi/survey/catalogs/Y1/LSS/iron/LSScats/v0.1/blinded/pk/covariances/"
-        cov_fn = os.path.join(d, f"cov_gaussian_prerec_{tracer}_{region}_{zmin}_{zmax}.txt")
-        tC = np.loadtxt(cov_fn)
-        tC = truncate_cov(tC, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
-        cov = np.zeros_like(tC)
-        klen = len(np.arange(kolim[0], kolim[1], 0.005))
-        for k in range(-2,3):
-            cov += np.diag(np.diag(tC,k=k),k=k) + np.diag(np.diag(tC,k=k+klen),k=k+klen) + np.diag(np.diag(tC,k=k-klen),k=k-klen)
- 
-    if data_type ==  "secondGenMocksY1":
-        data_dir = "/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/"
-
-        #zmin = 0.4 if tracer=='LRG' else 0.8
-        #zmax = 0.6 if tracer=='LRG' else 1.1
-
-        # P(k)
-        pk_fn = os.path.join(data_dir, "pk/power_mock0_{}_complete_{}{}{}.npy".format(tracer, region, '_rpcut{:.1f}_directedges_max5000'.format(rp_cut) if rp_cut else '', '_highres' if highres else ''))
-        #pk_fn = os.path.join('/global/cfs/cdirs/desi/survey/catalogs/Y1/mocks/SecondGenMocks/AbacusSummit/mock0/pk/pkpoles_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}.npy'.format(tracer, region, zmin, zmax, '_rpcut{:.1f}'.format(rp_cut) if rp_cut else ''))
-        pk = CatalogFFTPower.load(pk_fn).poles
-        #pk = PowerSpectrumStatistics.load(pk_fn)
-        pk.select(kolim).rebin(korebin)
-        # Window matrix
-        #wm_fn = os.path.join(data_dir, 'windows', 'wmatrix_smooth_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}.npy'.format(tracer, region, zmin, zmax, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else ''))
-        wm_fn = os.path.join(data_dir, 'windows/{}wm_{}_complete_{}{}.npy'.format('' if highres else 'old/', tracer, region, '_rpcut{:.1f}_directedges_max5000'.format(rp_cut) if rp_cut else ''))
-        #wm_fn = "/global/cfs/cdirs/desi/survey/catalogs/Y1/LSS/iron/LSScats/v0.4/blinded/pk/wmatrix_smooth_{}_{}_{}_{}_default_FKP_lin_{}.npy".format('LRG', 'GCcomb', 0.4, 0.6, 'rpcut{:.1f}'.format(rp_cut) if rp_cut else '')
-        # Covariance
-        covdir = '/global/cfs/cdirs/desi/survey/catalogs/Y1/LSS/iron/LSScats/v0.6/blinded/pk/covariances/v0.1.5'
-        c1 = np.loadtxt(os.path.join(covdir, 'cov_gaussian_prerec_ELG_LOPnotqso_GCcomb_0.8_1.1.txt'))
-        c1_trunc = truncate_cov(c1, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
-        c2 = np.loadtxt(os.path.join(covdir, 'cov_gaussian_prerec_ELG_LOPnotqso_GCcomb_1.1_1.6.txt'))
-        c2_trunc = truncate_cov(c2, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
-        cov = np.linalg.inv(np.linalg.inv(c1_trunc) + np.linalg.inv(c2_trunc))
-        # d = "/global/cfs/cdirs/desi/survey/catalogs/Y1/LSS/iron/LSScats/v0.1/blinded/pk/covariances/"
-        # cov_fn = os.path.join(d, f"cov_gaussian_prerec_LRG_NGCSGCcomb_0.4_0.6.txt")
-        # tC = np.loadtxt(cov_fn)
-        # cov = np.zeros_like(tC)
-        # for k in range(-2,3):
-        #     cov += np.diag(np.diag(tC,k=k),k=k) + np.diag(np.diag(tC,k=k+80),k=k+80) + np.diag(np.diag(tC,k=k-80),k=k-80)
-
-    if data_type ==  "rawY1secondgenmocks":
-        data_dir = "/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/"
-        # P(k)
-        from power_spectrum import naming
-        power_fn = os.path.join(data_dir, 'pk', naming(filetype='power', data_type=data_type, imock=0, tracer=tracer, completeness='complete_', region=region, cellsize=cellsize, highres=True))
-        pk = CatalogFFTPower.load(power_fn).poles
-        pk.select(kolim).slice(slice(0, len(pk.k) // korebin * korebin, korebin))
-        # Window matrix
-        wm_fn = os.path.join(data_dir, 'windows', naming(filetype='wm', data_type=data_type, imock=0, tracer=tracer, completeness='complete_', region=region, cellsize=cellsize, boxsize=None, rpcut=rp_cut, direct_edges=rp_cut)).format('')
-        # Covariance
-        if region=="GCcomb": region="NGCSGCcomb"
-        if tracer=='ELG_LOP': tracer='ELG_LOPnotqso'
-        d = "/global/cfs/cdirs/desi/survey/catalogs/Y1/LSS/iron/LSScats/v0.1/blinded/pk/covariances/"
-        cov_fn = os.path.join(d, f"cov_gaussian_prerec_{tracer}_{region}_{zmin}_{zmax}.txt")
-        tC = np.loadtxt(cov_fn)
-        tC = truncate_cov(tC, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
-        cov = np.zeros_like(tC)
-        klen = len(np.arange(kolim[0], kolim[1], 0.005))
-        for k in range(-2,3):
-            cov += np.diag(np.diag(tC,k=k),k=k) + np.diag(np.diag(tC,k=k+klen),k=k+klen) + np.diag(np.diag(tC,k=k-klen),k=k-klen)
-
-    if covtype == 'ezmocks':
-        cov = get_EZmocks_covariance(tracer, region, ells=[0, 2, 4], rpcut=rpcut)
-        cov = truncate_cov(cov, kinit=np.arange(0.0037, 0.5625, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
+    elif source == 'local':
+        wm_fn = LocalFileName().set_default_config(mockgen=catalog, ftype='wmatrix_smooth', tracer=tracer, region=region, completeness=completeness, realization=0 if catalog=='first' else None, rpcut=rpcut, thetacut=thetacut, directedges=(bool(rpcut) or bool(thetacut)))
+        wm_fn.update(cellsize=None, boxsize=10000)
+        pk_fn = LocalFileName().set_default_config(mockgen=catalog, tracer=tracer, region=region, completeness=completeness, rpcut=rpcut, thetacut=thetacut, directedges=(bool(rpcut) or bool(thetacut)))
+        
+    else: raise ValueError('Unknown source: {}. Possible source values are `desi` or `local`.'.format(source))
 
     # Window matrix
-    # if data_type=='y1' and version=='v0.4':
-    #     wm = wmatrix
-    # else:
-    wm = PowerSpectrumSmoothWindowMatrix.load(wm_fn)
+    wm_fn.update(zrange=zrange)
+    wm = PowerSpectrumSmoothWindowMatrix.load(wm_fn.get_path())
     w = wm.deepcopy()
     ktmin = w.xout[0][0]/2
     w.select_x(xoutlim=kolim)
@@ -121,91 +117,94 @@ def get_data(data_type, tracer, region, rp_cut, zrange, version="v0.4", kolim=(0
     w.slice_x(slicein=slice(0, len(w.xin[0]) // ktrebin * ktrebin, ktrebin), sliceout=slice(0, len(w.xout[0]) // korebin * korebin, korebin))
     #w.rebin_x(factorout=korebin)
 
+    # Power spectrum
+    pk_fn.update(zrange=zrange)
+    pk = load_poles(pk_fn.get_path())
+    pk.select(kolim).slice(slice(0, len(pk.k) // korebin * korebin, korebin))
+    
+    # Covariance matrix
+    cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/cov_gaussian_pre_{}_{}_{:.1f}_{:.1f}_default_FKP_lin.txt'.format(tracer, region, zmin, zmax)
+    cov = np.loadtxt(cov_fn)
+    cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
+    
+    #covdir = '/global/cfs/cdirs/desi/survey/catalogs/Y1/LSS/iron/LSScats/v0.6/blinded/pk/covariances/v0.1.5'
+    #c1 = np.loadtxt(os.path.join(covdir, 'cov_gaussian_prerec_ELG_LOPnotqso_GCcomb_0.8_1.1.txt'))
+    #c1_trunc = truncate_cov(c1, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
+    #c2 = np.loadtxt(os.path.join(covdir, 'cov_gaussian_prerec_ELG_LOPnotqso_GCcomb_1.1_1.6.txt'))
+    #c2_trunc = truncate_cov(c2, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
+    #cov = np.linalg.inv(np.linalg.inv(c1_trunc) + np.linalg.inv(c2_trunc))
+    if covtype == 'ezmocks':
+        cov = get_EZmocks_covariance(tracer, region, ells=[0, 2, 4], rpcut=rpcut)
+        cov = truncate_cov(cov, kinit=np.arange(0.0037, 0.5625, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
+
     return {'power': pk, 'wmatrix': w, 'covariance': cov}
 
 
-def get_EZmocks_covariance(tracer, region, ells=[0, 2, 4], rpcut=2.5):
-    ez_dir = f"/global/cfs/cdirs/desi/cosmosim/KP45/MC/Clustering/EZmock/CutSky_6Gpc/{tracer}/Pk/Pre/forero/dk0.005/z0.800"
-    pk_list = [CatalogFFTPower.load(os.path.join(ez_dir, "cutsky_{}_z0.800_EZmock_B6000G1536Z0.8N216424548_b0.385d4r169c0.3_seed{}/{}/0.4z0.6f0.839{}/pre_pk.pkl.npy".format(tracer, i, region, '_rpcut{}'.format(rpcut) if rpcut else ''))) for i in range(1, 1001)]
-    k = pk_list[0].poles.k
-    # remove nan
-    mask = k[k <= np.nanmax(k)]
-    poles_list = [pk_list[i].poles(ell=ells, complex=False) for i in range(0, 1000)]
-    poles_list_nonan = [np.array([poles_list[i][ill][mask] for ill in len(ells)]).flatten() for i in range(0, 1000)]
-    cov = np.cov(poles_list_nonan, rowvar=False, ddof=1)
-    return cov
-
-
-def rotate_data(data_type, tracer, region, rp_cut, zrange, version='v0.4', ells=[0, 2, 4], kolim=(0.02, 0.2), korebin=10, ktmax=0.5, ktrebin=10, nran=5, cellsize=8, boxsize=8000, covtype="analytic", save=True):
-    data = get_data(data_type, tracer, region, rp_cut, zrange, version, kolim, korebin, ktmax, ktrebin, nran, cellsize, boxsize)
+def rotate_data(ells=[0, 2,4], capsig=1000, difflfac=100, save=True, **kwargs):
+    
+    t0 = time.time()
+    
+    data = get_data(**kwargs)
     data_processed = pe.make(data['power'], data['wmatrix'], data['covariance'])
 
     # Fit
-    Mopt, state = rw.fit(data_processed, ls=ells, momt=rp_cut)
+    mmatrix, state = rw.fit(data_processed, ls=ells, momt=max(kwargs['rpcut'], kwargs['thetacut']), capsig=capsig, difflfac=difflfac)
 
     # Rotated data
-    rotated_data = pe.rotate(data_processed, Mopt, ls=ells)
+    rotated_data = pe.rotate(data_processed, mmatrix, ls=ells)
 
     pknew = rotated_data.data.P
     wmatrixnew = data['wmatrix'].copy()
     wmatrixnew.value = np.array(rotated_data.W(ls=ells)).T
     covnew = rotated_data.C(ls=ells)
     mo = rotated_data.mo
-
+    if len(mmatrix) == 4:
+        mt = mmatrix[2]
+        m = mmatrix[3]
+    else:
+        mt = None
+        m = None
+        
     datanew = {'power': pknew, 'wmatrix': wmatrixnew, 'covariance': covnew}
 
     if save:
-        output_dir = os.path.join("/global/cfs/cdirs/desi/users/mpinon/sculpt_window/", data_type, version if data_type=='y1' else '')
-        zmin = zrange[0]
-        zmax = zrange[1]
-        #window_fn = os.path.join(output_dir, "sculpt_window/", "wmatrix_{}_complete_{}{}_ells{}{}.npy".format(tracer, region, '_rp{:.1f}'.format(rpcut) if rpcut else '', ''.join([str(i) for i in ells]), '' if highres else '_lowres'))
-        resinfo = '_nran{:d}_cellsize{:d}_boxsize{:d}'.format(nran, cellsize, boxsize) if version=='test' else ''       
-        window_fn = os.path.join(output_dir, 'wmatrix_smooth_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10.npy'.format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
-        wmatrixnew.save(window_fn)
-        Mopt_fn = os.path.join(output_dir, 'mmatrix_smooth_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10.npy'.format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
-        np.save(Mopt_fn, np.array(Mopt[0], dtype="float64"))
-        mo_fn = os.path.join(output_dir, 'mo_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10.npy'.format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}_directedges'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
-        np.save(mo_fn, mo)
-        #power_fn = os.path.join(output_dir, "sculpt_window/", "pkpoles_{}_complete_{}{}_ells{}{}.npy".format(tracer, region, '_rp{:.1f}'.format(rpcut) if rpcut else '', ''.join([str(i) for i in ells]), '' if highres else '_lowres'))
-        power_fn = os.path.join(output_dir, "pkpoles_{}_complete_gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10.npy".format(tracer, region, zmin, zmax, resinfo, '_rpcut{:.1f}'.format(rp_cut) if rp_cut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
-        np.save(power_fn, pknew)
-        cov_fn = os.path.join(output_dir, "cov_{}_complete_{}_{:.1f}_{:.1f}{}{}_ells{}_{}cov_ktmax{}_autokwid_capsig5_difflfac10.npy".format(tracer, region, zmin, zmax, resinfo, '_rp{:.1f}'.format(rpcut) if rpcut else '', ''.join([str(i) for i in ells]), covtype, ktmax))
-        np.save(cov_fn, covnew)
-
-    return datanew
+        output_dir = "/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/sculpt_window".format(kwargs['version'])        
+        output_fn = LocalFileName().set_default_config(ftype='sculpt_all', tracer=kwargs['tracer'], region=kwargs['region'], completeness=kwargs['completeness'], realization=None, weighting=None, rpcut=kwargs['rpcut'], thetacut=kwargs['thetacut'])
+        output_fn.update(fdir=output_dir, zrange=kwargs['zrange'], cellsize=None, boxsize=None, directedges=False)
+        output_fn.sculpt_attrs['ells'] = ells
+        output_fn.sculpt_attrs['kobsmax'] = kwargs['kolim'][-1]
+        output_fn.sculpt_attrs['ktmax'] = kwargs['ktmax']
+        output_fn.sculpt_attrs['capsig'] = capsig
+        output_fn.sculpt_attrs['difflfac'] = difflfac     
+        
+        sculpt_window = SculptWindow(wmatrix=data['wmatrix'], pk=data['power'], cov=data['covariance'], mmatrix=mmatrix[0], mo=mo, mt=mt, m=m, wmatrixnew=wmatrixnew, pknew=np.array(pknew), covnew=covnew)
+        sculpt_window.save(output_fn.get_path())
+        
+    print('Elapsed time: {:.2f} s'.format(time.time() - t0))
 
 
 if __name__ == '__main__':
-    data_type = 'secondGenMocksY1'
-    version = ''
+    source = 'desi' # desi or local
+    catalog = 'second' # first, second, or data
+    version = 'v3'
 
-    if data_type == "secondGenMocksY1" or data_type == "rawY1secondgenmocks":
-        tracer = "ELG_LOP"
-        region = "SGC"
-        rpcut = 2.5
-        ls = [0, 2, 4]
-        kolim = (0., 0.4)
-        korebin = 1
-        ktrebin = 1
-        zrange = (0.8, 1.6)
-
-    if data_type == "y1":
-        tracer = "LRG"
-        region = "GCcomb"
-        rpcut = 2.5
-        ls = [0, 2, 4]
-        kolim = (0., 0.4)
-        korebin = 5
-        ktrebin = 1
-        zrange = (0.4, 0.6)
-        if version == 'test':
-            kolim = (0., 0.39)
-
-    nran = 5
-    cellsize = 6
-    boxsize = 7000
-    covtype = "analytic"
+    tracer = "ELG_LOPnotqso"
+    region = "SGC"
+    zrange = (0.8, 1.1)
+    completeness = True
+    
+    ls = [0, 2, 4]
+    
+    kolim = (0., 0.4)
+    korebin = 5
     ktmax = 0.5
+    ktrebin = 1
 
-    rotate_data(data_type, tracer, region, rp_cut=rpcut, zrange=zrange, ells=ls, version=version, kolim=kolim, korebin=korebin, ktmax=ktmax, ktrebin=ktrebin, covtype=covtype, save=True, nran=nran, cellsize=cellsize, boxsize=boxsize)
+    rpcut = 0.
+    thetacut = 0.05
+    
+    capsig = 1000
+    difflfac = 100
+
+    rotate_data(source=source, catalog=catalog, version=version, tracer=tracer, region=region, zrange=zrange, completeness=completeness, rpcut=rpcut, thetacut=thetacut, ells=ls, kolim=kolim, korebin=korebin, ktmax=ktmax, ktrebin=ktrebin, save=True, capsig=capsig, difflfac=difflfac)
 
