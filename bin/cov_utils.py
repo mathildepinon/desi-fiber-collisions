@@ -36,3 +36,13 @@ def read_xi_cov(tracer="LRG", region="GCcomb", version="0.6", zmin=0.4, zmax=0.6
     cov = cut_matrix(cov, smid, (0, 2, 4), slim)
     return cov
 
+def get_EZmocks_covariance(tracer, region, ells=[0, 2, 4], rpcut=2.5):
+    ez_dir = f"/global/cfs/cdirs/desi/cosmosim/KP45/MC/Clustering/EZmock/CutSky_6Gpc/{tracer}/Pk/Pre/forero/dk0.005/z0.800"
+    pk_list = [CatalogFFTPower.load(os.path.join(ez_dir, "cutsky_{}_z0.800_EZmock_B6000G1536Z0.8N216424548_b0.385d4r169c0.3_seed{}/{}/0.4z0.6f0.839{}/pre_pk.pkl.npy".format(tracer, i, region, '_rpcut{}'.format(rpcut) if rpcut else ''))) for i in range(1, 1001)]
+    k = pk_list[0].poles.k
+    # remove nan
+    mask = k[k <= np.nanmax(k)]
+    poles_list = [pk_list[i].poles(ell=ells, complex=False) for i in range(0, 1000)]
+    poles_list_nonan = [np.array([poles_list[i][ill][mask] for ill in len(ells)]).flatten() for i in range(0, 1000)]
+    cov = np.cov(poles_list_nonan, rowvar=False, ddof=1)
+    return cov
