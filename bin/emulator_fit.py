@@ -127,7 +127,7 @@ def get_fit_setup(tracer, theory_name='velocileptors'):
         slim = {ell: [smin, 150., 4.] for ell in ells}
     if tracer.startswith('ELG'):
         z = 1.1
-        b0 = 0.84
+        b0 = 0.722
         smin, kmax = 30., 0.2
         if 'bao' in theory_name: smin, kmax = 40., 0.3
         klim = {ell: [0.02, kmax, 0.005] for ell in ells}
@@ -142,7 +142,7 @@ def get_fit_setup(tracer, theory_name='velocileptors'):
     return z, b0, klim, slim
 
 
-def get_power_likelihood(source='desi', catalog='second', version='v3', tracer='ELG', region='NGC', completeness='', theory_name='velocileptors', solve=True, rp_cut=0, theta_cut=0, direct=True, imock=None, sculpt_window=False, priors=None, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), footprint_fn=os.path.join('.', 'footprints', 'footprint_{}{}.npy')):
+def get_power_likelihood(source='desi', catalog='second', version='v3', tracer='ELG', region='NGC', redshift=None, completeness='', theory_name='velocileptors', solve=True, rp_cut=0, theta_cut=0, direct=True, imock=None, sculpt_window=False, priors=None, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), footprint_fn=os.path.join('.', 'footprints', 'footprint_{}{}.npy')):
 
     from desilike.observables.galaxy_clustering import TracerPowerSpectrumMultipolesObservable, ObservablesCovarianceMatrix, CutskyFootprint, SystematicTemplatePowerSpectrumMultipoles
     from desilike.likelihoods import ObservablesGaussianLikelihood
@@ -157,6 +157,8 @@ def get_power_likelihood(source='desi', catalog='second', version='v3', tracer='
             footprint = CutskyFootprint.load(footprint_fn)
     
     z, b0, klim, slim = get_fit_setup(tracer, theory_name=theory_name)
+    if redshift is not None:
+        z = redshift
     from cosmoprimo.fiducial import DESI
     fiducial = DESI()
     b1E = b0 / fiducial.growth_factor(z)
@@ -184,7 +186,7 @@ def get_power_likelihood(source='desi', catalog='second', version='v3', tracer='
     if 'cubic' in catalog:
         wmatrix = None
         klim = {ell: [0.02, 0.35, 0.005] for ell in [0, 2, 4]}
-        data_fn = LocalFileName().set_default_config(mockgen='cubic', tracer=tracer, region=region, realization=imock if imock is not None else '*').get_path()
+        data_fn = LocalFileName().set_default_config(mockgen='cubic', tracer=tracer, region=region, realization=imock if imock is not None else '*', los='*', z=z)
     else:
         if source == 'desi':
             wm_fn = DESIFileName().set_default_config(version=version, ftype='wmatrix_smooth', tracer=tracer, region=region, completeness=completeness, realization='merged')
@@ -266,8 +268,7 @@ def get_power_likelihood(source='desi', catalog='second', version='v3', tracer='
     cov = np.loadtxt(cov_fn)
     cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*klim[0]))
     if sculpt_window:
-        cov_fn = wmatrix_fn.get_path(ftype='cov', realization=None)
-        cov = np.load(cov_fn)
+        cov = sculptwm.covnew
         cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*klim[0]))
     likelihood = ObservablesGaussianLikelihood(observables=[observable], covariance=cov)
     #likelihood.all_params['b1'].update(ref={'limits': [0.25, 0.35]})
@@ -374,6 +375,7 @@ if __name__ == '__main__':
     parser.add_argument('--version', type=str, required=False, default='v3', choices=['v1', 'v2', 'v3'])
     parser.add_argument('--tracer', type=str, required=False, default='ELG')
     parser.add_argument('--region', type=str, required=False, default='SGC', choices=['NGC', 'SGC', 'NS', 'SS', 'GCcomb', ''])
+    parser.add_argument('--redshift', type=float, required=False, default=None)
     parser.add_argument('--completeness', type=bool, required=False, default=True)
     parser.add_argument('--zmin', type=float, required=False, default=None)
     parser.add_argument('--zmax', type=float, required=False, default=None)
@@ -394,6 +396,7 @@ if __name__ == '__main__':
     version = args.version
     tracer = args.tracer
     region = args.region
+    redshift = args.redshift
     completeness = args.completeness
     zmin = args.zmin
     zmax = args.zmax
@@ -408,16 +411,21 @@ if __name__ == '__main__':
     sculpt_window = args.sculpt_window
     priors = args.sculpt_window_priors
     
-    if catalog == 'cubic':
-        data_dir = '/global/cfs/cdirs/desi/users/mpinon/cubicSecondGenMocks/'
-    elif catalog == 'second':
-        data_dir = '/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/'.format(version)
-    footprint_fn=os.path.join(data_dir, 'footprints', 'footprint_{}{}.npy')
     theory_dir = 'bao' if 'bao' in args.theory_name else ''
     template_name = 'shapefitqisoqap'
+
+    if catalog == 'cubic':
+        data_dir = '/global/cfs/cdirs/desi/users/mpinon/cubicSecondGenMocks/z{:.3f}'.format(redshift)
+        profiles_dir = os.path.join(data_dir, theory_dir, 'profiles', 'profiles_{}_{}'.format(template_name, tracer))
+        chains_dir = os.path.join(data_dir, theory_dir, 'chains', 'chains_{}_{}'.format(template_name, tracer))
+
+    elif catalog == 'second':
+        data_dir = '/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/'.format(version)
+        profiles_dir = os.path.join(data_dir, theory_dir, 'profiles', 'profiles_{}_{}_{}{}'.format(template_name, tracer, 'complete_' if completeness else '', region))
+        chains_dir = os.path.join(data_dir, theory_dir, 'chains', 'chains_{}_{}_{}{}'.format(template_name, tracer, 'complete_' if completeness else '', region))
+    
+    footprint_fn=os.path.join(data_dir, 'footprints', 'footprint_{}{}.npy')        
     emulator_dir = os.path.join(data_dir, theory_dir, 'emulators', 'emulators_{}_{}'.format(template_name, tracer))
-    profiles_dir = os.path.join(data_dir, theory_dir, 'profiles', 'profiles_{}_{}_{}{}'.format(template_name, tracer, 'complete_' if completeness else '', region))
-    chains_dir = os.path.join(data_dir, theory_dir, 'chains', 'chains_{}_{}_{}{}'.format(template_name, tracer, 'complete_' if completeness else '', region))
     
     if rp_cut:
         cutflag = '_rpcut{:.1f}'.format(rp_cut)
@@ -427,14 +435,14 @@ if __name__ == '__main__':
         cutflag = ''
     
     if 'emulator' in todo:
-        if power: get_power_likelihood(source=source, catalog=catalog, version=version, tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, save_emulator=True, emulator_fn=os.path.join(emulator_dir, 'power_{}.npy'), footprint_fn=footprint_fn)
+        if power: get_power_likelihood(source=source, catalog=catalog, version=version, tracer=tracer, region=region, redshift=redshift, completeness=completeness, theory_name=theory_name, save_emulator=True, emulator_fn=os.path.join(emulator_dir, 'power_{}.npy'), footprint_fn=footprint_fn)
         if corr: get_corr_likelihood(tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, save_emulator=True, emulator_fn=os.path.join(emulator_dir, 'corr_{}.npy'), footprint_fn=footprint_fn)
     
     if 'profiling' in todo:
         from desilike.profilers import MinuitProfiler
         
         if power:
-            likelihood = get_power_likelihood(source=source, catalog=catalog, version=version, tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, solve=True, rp_cut=rp_cut, theta_cut=theta_cut, direct=direct, imock=imock, sculpt_window=sculpt_window, emulator_fn=os.path.join(emulator_dir, 'power_{}.npy'), footprint_fn=footprint_fn)
+            likelihood = get_power_likelihood(source=source, catalog=catalog, version=version, tracer=tracer, region=region, redshift=redshift, completeness=completeness, theory_name=theory_name, solve=True, rp_cut=rp_cut, theta_cut=theta_cut, direct=direct, imock=imock, sculpt_window=sculpt_window, emulator_fn=os.path.join(emulator_dir, 'power_{}.npy'), footprint_fn=footprint_fn)
             profiler = MinuitProfiler(likelihood, seed=43, save_fn=os.path.join(profiles_dir, 'power{}_{}{}{}{}{}.npy'.format('_mock{}'.format(imock) if imock is not None else '', theory_name, cutflag, '_directedges' if (rp_cut or theta_cut) and direct else '', '_sculptwindow' if sculpt_window else '', '_priors{}'.format(priors) if priors is not None else '')))
             profiler.maximize(niterations=1)
         
@@ -447,7 +455,7 @@ if __name__ == '__main__':
         from desilike.samplers import EmceeSampler
         
         if power:
-            likelihood = get_power_likelihood(source=source, catalog=catalog, version=version, tracer=tracer, region=region, completeness=completeness, theory_name=theory_name, rp_cut=rp_cut, theta_cut=theta_cut, direct=direct, imock=imock, sculpt_window=sculpt_window, priors=priors, emulator_fn=os.path.join(emulator_dir, 'power_{}.npy'), footprint_fn=footprint_fn)
+            likelihood = get_power_likelihood(source=source, catalog=catalog, version=version, tracer=tracer, region=region, redshift=redshift, completeness=completeness, theory_name=theory_name, rp_cut=rp_cut, theta_cut=theta_cut, direct=direct, imock=imock, sculpt_window=sculpt_window, priors=priors, emulator_fn=os.path.join(emulator_dir, 'power_{}.npy'), footprint_fn=footprint_fn)
             sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=43, save_fn=os.path.join(chains_dir, 'power_{}{}{}{}{}_{}*.npy'.format(theory_name, cutflag, '_directedges' if (rp_cut or theta_cut) and direct else '', '_sculptwindow' if sculpt_window else '', '_priors{:.0f}'.format(priors) if priors is not None else '',  'mock{}_'.format(imock) if imock is not None else '')))
             sampler.run(check={'max_eigen_gr': 0.02})
         

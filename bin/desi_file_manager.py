@@ -102,10 +102,10 @@ class DESIFileName():
         if self.tracer[:3]=='ELG':
             if 'allcounts' in self.ftype:
                 default_options = dict(tracer='ELG_LOP' if self.completeness else 'ELG_LOPnotqso',
-                                       zrange=(0.8, 1.6),
-                                       nran=10,
-                                       njack=0,
-                                       split=20)
+                                       zrange=(0.8, 1.6))
+                                       #nran=10,
+                                       #njack=0,
+                                       #split=20)
             else:
                 default_options = dict(tracer='ELG_LOP' if self.completeness else 'ELG_LOPnotqso',
                                        zrange=(0.8, 1.6))

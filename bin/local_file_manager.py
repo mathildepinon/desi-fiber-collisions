@@ -232,12 +232,20 @@ class LocalFileName():
         
         if self.mockgen == 'cubic':
             if self.tracer[:3]=='ELG':
-                default_options = dict(tracer='ELG',
-                                       region=None,
-                                       zrange=None,
-                                       z=1.1,
-                                       nmesh=2048,
-                                       boxsize=2000)
+                if (self.z == 1.1) or (self.z is None):
+                    default_options = dict(tracer='ELG',
+                                           region=None,
+                                           zrange=None,
+                                           z=1.1,
+                                           nmesh=2048,
+                                           boxsize=2000)
+                if self.z == 0.95:
+                    default_options = dict(tracer='ELG',
+                                           region=None,
+                                           zrange=None,
+                                           z=self.z,
+                                           cellsize=6,
+                                           boxsize=2000)
                 subdir = 'pk'
             ## need to add LRG, QSO, BGS
             else:

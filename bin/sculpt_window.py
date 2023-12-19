@@ -127,12 +127,6 @@ def get_data(source='desi', catalog='second', version='v3', tracer='ELG', region
     cov = np.loadtxt(cov_fn)
     cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
     
-    #covdir = '/global/cfs/cdirs/desi/survey/catalogs/Y1/LSS/iron/LSScats/v0.6/blinded/pk/covariances/v0.1.5'
-    #c1 = np.loadtxt(os.path.join(covdir, 'cov_gaussian_prerec_ELG_LOPnotqso_GCcomb_0.8_1.1.txt'))
-    #c1_trunc = truncate_cov(c1, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
-    #c2 = np.loadtxt(os.path.join(covdir, 'cov_gaussian_prerec_ELG_LOPnotqso_GCcomb_1.1_1.6.txt'))
-    #c2_trunc = truncate_cov(c2, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
-    #cov = np.linalg.inv(np.linalg.inv(c1_trunc) + np.linalg.inv(c2_trunc))
     if covtype == 'ezmocks':
         cov = get_EZmocks_covariance(tracer, region, ells=[0, 2, 4], rpcut=rpcut)
         cov = truncate_cov(cov, kinit=np.arange(0.0037, 0.5625, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
@@ -190,7 +184,7 @@ if __name__ == '__main__':
 
     tracer = "ELG_LOPnotqso"
     region = "SGC"
-    zrange = (0.8, 1.1)
+    zrange = (0.8, 1.6)
     completeness = True
     
     ls = [0, 2, 4]
@@ -203,8 +197,8 @@ if __name__ == '__main__':
     rpcut = 0.
     thetacut = 0.05
     
-    capsig = 1000
-    difflfac = 100
+    capsig = 5
+    difflfac = 10
 
     rotate_data(source=source, catalog=catalog, version=version, tracer=tracer, region=region, zrange=zrange, completeness=completeness, rpcut=rpcut, thetacut=thetacut, ells=ls, kolim=kolim, korebin=korebin, ktmax=ktmax, ktrebin=ktrebin, save=True, capsig=capsig, difflfac=difflfac)
 
