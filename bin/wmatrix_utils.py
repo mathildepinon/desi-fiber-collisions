@@ -43,7 +43,7 @@ def plot_matrix(mat, x1=None, x2=None, xlabel1=None, xlabel2=None, barlabel=None
             xx1, xx2 = x1[i], x2[j]
             if x1[i] is None: xx1 = 1 + np.arange(mat[i][j].shape[0])
             if x2[j] is None: xx2 = 1 + np.arange(mat[i][j].shape[1])
-            mesh = ax.pcolor(xx1, xx2, mat[i][j].T, norm=norm, cmap=plt.get_cmap('jet_r'))
+            mesh = ax.pcolor(xx1, xx2, mat[i][j].T, norm=norm, cmap=plt.get_cmap('RdBu'))
             if i > 0 or x1[i] is None: ax.yaxis.set_visible(False)
             if j == 0 and xlabel1[i]: ax.set_xlabel(xlabel1[i], fontsize=labelsize)
             if j > 0 or x2[j] is None: ax.xaxis.set_visible(False)
@@ -53,9 +53,10 @@ def plot_matrix(mat, x1=None, x2=None, xlabel1=None, xlabel2=None, barlabel=None
                 text = r'{} $\times$ {}'.format(label1[i], label2[j])
                 ax.text(0.05, 0.95, text, horizontalalignment='left', verticalalignment='top',\
                         transform=ax.transAxes, color='black')
+            ax.grid(False)
 
     fig.subplots_adjust(right=xextend)
-    cbar_ax = fig.add_axes([xextend + 0.25, 0.15, 0.03, 0.7])
+    cbar_ax = fig.add_axes([xextend + 0.2, 0.11, 0.03, 0.86])
     cbar_ax.tick_params()
     cbar = fig.colorbar(mesh, cax=cbar_ax)
     if barlabel: cbar.set_label(barlabel, rotation=90)

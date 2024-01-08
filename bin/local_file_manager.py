@@ -106,7 +106,7 @@ class LocalFileName():
             
         # when sculpting window (chnage of basis through Pat's transformation)
         if self.sculpt_attrs is not None:
-            sculpt_attrs = '_ells{}_kobsmax{:.1f}_ktmax{:.1f}_capsig{:d}_difflfac{:d}_{}cov'.format(''.join([str(i) for i in self.sculpt_attrs['ells']]), self.sculpt_attrs['kobsmax'], self.sculpt_attrs['ktmax'], self.sculpt_attrs['capsig'], self.sculpt_attrs['difflfac'], self.sculpt_attrs['covtype'])
+            sculpt_attrs = '_ells{}_kobsmax{:.1f}_ktmax{:.1f}_capsig{}_difflfac{}_{}cov'.format(''.join([str(i) for i in self.sculpt_attrs['ells']]), self.sculpt_attrs['kobsmax'], self.sculpt_attrs['ktmax'], self.sculpt_attrs['capsig'], self.sculpt_attrs['difflfac'], self.sculpt_attrs['covtype'])
         else:
             sculpt_attrs = ''
 
@@ -146,13 +146,16 @@ class LocalFileName():
                                            cellsize=4,
                                            directedges=True)
                     subdir = 'pk'
-                    
-                    if 'sculpt' in self.ftype:
-                        default_options['sculpt_attrs'] = {'ells': [0, 2, 4], 'kobsmax': 0.4, 'ktmax': 0.5, 'capsig': 5, 'difflfac': 10, 'covtype': 'analytic'}
-                        
+            elif self.tracer[:3]=='LRG':
+                default_options = dict(tracer='LRG',
+                                       zrange=(0.4, 0.6) if self.zrange is None else self.zrange) 
+                subdir = 'xi' if 'corr' in self.ftype else 'pk'
             ## need to add LRG, QSO, BGS
             else:
                 raise ValueError('Unknown tracer: {}'.format(tracer))
+            
+            if 'sculpt' in self.ftype:
+                default_options['sculpt_attrs'] = {'ells': [0, 2, 4], 'kobsmax': 0.4, 'ktmax': 0.5, 'capsig': 5, 'difflfac': 10, 'covtype': 'analytic'}
  
             default_options['fdir'] = os.path.join('/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1', subdir)
         
@@ -164,14 +167,17 @@ class LocalFileName():
                                            zrange=None,
                                            z=1.1,
                                            nmesh=2048,
+                                           cellsize=None,
                                            boxsize=2000)
-                if self.z == 0.95:
+                if (self.z == 0.95) or (self.z == 1.325):
                     default_options = dict(tracer='ELG',
                                            region=None,
                                            zrange=None,
                                            z=self.z,
+                                           nmesh=None,
                                            cellsize=6,
                                            boxsize=2000)
+
                 subdir = 'pk'
             ## need to add LRG, QSO, BGS
             else:

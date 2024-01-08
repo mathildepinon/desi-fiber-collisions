@@ -89,7 +89,6 @@ class SculptWindow():
         new.__setstate__(state)
         return new
     
-    
 
 def get_data(source='desi', catalog='second', version='v3', tracer='ELG', region='NGC', completeness=True, rpcut=0, thetacut=0, zrange=None, kolim=(0.02, 0.2), korebin=10, ktmax=0.5, ktrebin=10, nran=None, cellsize=None, boxsize=None, covtype='analytic'):
 
@@ -123,13 +122,13 @@ def get_data(source='desi', catalog='second', version='v3', tracer='ELG', region
     pk.select(kolim).slice(slice(0, len(pk.k) // korebin * korebin, korebin))
     
     # Covariance matrix
-    cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/cov_gaussian_pre_{}_{}_{:.1f}_{:.1f}_default_FKP_lin.txt'.format(tracer, region, zmin, zmax)
+    cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/{}cov_gaussian_pre_{}_{}_{:.1f}_{:.1f}_default_FKP_lin.txt'.format('noisy_' if 'noisy' in covtype else '', tracer, region, zmin, zmax)
     cov = np.loadtxt(cov_fn)
     cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
     
     if covtype == 'ezmocks':
-        cov = get_EZmocks_covariance(tracer, region, ells=[0, 2, 4], rpcut=rpcut)
-        cov = truncate_cov(cov, kinit=np.arange(0.0037, 0.5625, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
+        cov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), rpcut=rpcut, thetacut=thetacut, rebin=korebin, return_x=False)
+        cov = truncate_cov(cov, kinit=np.arange(0., 0.520, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
 
     return {'power': pk, 'wmatrix': w, 'covariance': cov}
 
@@ -169,7 +168,8 @@ def rotate_data(ells=[0, 2,4], capsig=1000, difflfac=100, save=True, **kwargs):
         output_fn.sculpt_attrs['kobsmax'] = kwargs['kolim'][-1]
         output_fn.sculpt_attrs['ktmax'] = kwargs['ktmax']
         output_fn.sculpt_attrs['capsig'] = capsig
-        output_fn.sculpt_attrs['difflfac'] = difflfac     
+        output_fn.sculpt_attrs['difflfac'] = difflfac
+        output_fn.sculpt_attrs['covtype'] = kwargs['covtype']
         
         sculpt_window = SculptWindow(wmatrix=data['wmatrix'], pk=data['power'], cov=data['covariance'], mmatrix=mmatrix[0], mo=mo, mt=mt, m=m, wmatrixnew=wmatrixnew, pknew=np.array(pknew), covnew=covnew)
         sculpt_window.save(output_fn.get_path())
@@ -184,7 +184,7 @@ if __name__ == '__main__':
 
     tracer = "ELG_LOPnotqso"
     region = "SGC"
-    zrange = (0.8, 1.6)
+    zrange = (0.8, 1.1)
     completeness = True
     
     ls = [0, 2, 4]
@@ -199,6 +199,7 @@ if __name__ == '__main__':
     
     capsig = 5
     difflfac = 10
-
-    rotate_data(source=source, catalog=catalog, version=version, tracer=tracer, region=region, zrange=zrange, completeness=completeness, rpcut=rpcut, thetacut=thetacut, ells=ls, kolim=kolim, korebin=korebin, ktmax=ktmax, ktrebin=ktrebin, save=True, capsig=capsig, difflfac=difflfac)
+    covtype = 'noisyanalytic'
+    
+    rotate_data(source=source, catalog=catalog, version=version, tracer=tracer, region=region, zrange=zrange, completeness=completeness, rpcut=rpcut, thetacut=thetacut, ells=ls, kolim=kolim, korebin=korebin, ktmax=ktmax, ktrebin=ktrebin, save=True, capsig=capsig, difflfac=difflfac, covtype=covtype)
 

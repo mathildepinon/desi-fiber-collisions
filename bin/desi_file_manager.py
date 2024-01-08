@@ -9,13 +9,19 @@ class DESIFileName():
  
     Attributes
     ----------
-    version : str, default=''
+    fdir : str, default=''
+        Directory.
+        
+    mocktype : str, default='SecondGenMocks/AbacusSummit'
+        Mock type, e.g. 'SecondGenMocks/AbacusSummit' or 'SecondGenMocks/EZmock'.
+        
+    version : str, default='v3'
         Mocks version.
         
-    ftype : str, default=''
+    ftype : str, default='pkpoles'
         File type, e.g. 'pkpoles', 'wmatrix_smooth' etc.
         
-    realization : int, default=None
+    realization : int, default=0
         Index of the realization (e.g. mock index). If None, merged realizations.
         
     tracer : str, default='ELG'
@@ -29,7 +35,7 @@ class DESIFileName():
         
     **kwargs : other keyword arguments.
     """
-    _defaults = dict(fdir='', version="v3", ftype="pkpoles", realization=0, tracer="ELG", completeness=True, region="GCcomb", zrange=None, weighting=None, nran=None, cellsize=None, nmesh=None, boxsize=None, njack=None, split=None, rpcut=0., thetacut=0.)
+    _defaults = dict(fdir='', mocktype='SecondGenMocks/AbacusSummit', version="v3", ftype="pkpoles", realization=0, tracer="ELG", completeness=True, region="GCcomb", zrange=None, weighting=None, nran=None, cellsize=None, nmesh=None, boxsize=None, njack=None, split=None, rpcut=0., thetacut=0.)
 
     def __init__(self, *args, **kwargs):
         if len(args):
@@ -87,9 +93,9 @@ class DESIFileName():
                 return '_{}{}'.format(name, attr)
             
         if ('xi' in self.ftype) or ('counts' in self.ftype):
-            self.fdir = '/global/cfs/cdirs/desi/survey/catalogs/Y1/mocks/SecondGenMocks/AbacusSummit/desipipe/{}/{}/baseline_2pt/{}/xi/smu'.format(self.version, comp, rlz)
+            self.fdir = os.path.join(self.fdir, '/global/cfs/cdirs/desi/survey/catalogs/Y1/mocks/{}/desipipe/{}/{}/baseline_2pt/{}/xi/smu'.format(self.mocktype, self.version, comp, rlz))
         else:
-            self.fdir = '/global/cfs/cdirs/desi/survey/catalogs/Y1/mocks/SecondGenMocks/AbacusSummit/desipipe/{}/{}/baseline_2pt/{}/pk/'.format(self.version, comp, rlz)
+            self.fdir = os.path.join(self.fdir, '/global/cfs/cdirs/desi/survey/catalogs/Y1/mocks/{}/desipipe/{}/{}/baseline_2pt/{}/pk/'.format(self.mocktype, self.version, comp, rlz))
 
         fname = '{}_{}_{}_z{:.1f}-{:.1f}{}{}{}{}{}{}{}.npy'.format(self.ftype, self.tracer, self.region, self.zrange[0], self.zrange[1], self.weighting if self.weighting is not None else '', opt_attr('nran', self.nran), opt_attr('njack', self.njack), opt_attr('split', self.split), opt_attr('cellsize', self.cellsize), opt_attr('boxsize', self.boxsize), cut)
 
@@ -101,19 +107,23 @@ class DESIFileName():
             
         if self.tracer[:3]=='ELG':
             if 'allcounts' in self.ftype:
-                default_options = dict(tracer='ELG_LOP' if self.completeness else 'ELG_LOPnotqso',
-                                       zrange=(0.8, 1.6))
+                default_options = dict(tracer='ELG_LOP' if (self.completeness or 'EZmock' in self.mocktype) else 'ELG_LOPnotqso',
+                                       zrange=(0.8, 1.6) if self.zrange is None else self.zrange)
                                        #nran=10,
                                        #njack=0,
                                        #split=20)
             else:
-                default_options = dict(tracer='ELG_LOP' if self.completeness else 'ELG_LOPnotqso',
-                                       zrange=(0.8, 1.6))
+                default_options = dict(tracer='ELG_LOP' if (self.completeness or 'EZmock' in self.mocktype) else 'ELG_LOPnotqso',
+                                       zrange=(0.8, 1.6) if self.zrange is None else self.zrange)
                                        #nran=18,
                                        #cellsize=6,
                                        #boxsize=9000)
+                            
+        elif self.tracer[:3]=='LRG':
+            default_options = dict(tracer='LRG',
+                                   zrange=(0.4, 0.6) if self.zrange is None else self.zrange)      
                 
-        ## need to add LRG, QSO, BGS
+        ## need to add QSO, BGS
         else:
             raise ValueError('Unknown tracer: {}'.format(tracer))
         

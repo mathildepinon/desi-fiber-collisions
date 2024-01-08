@@ -28,7 +28,7 @@ def load_poles_list(fns, xlim=None, rebin=None):
         for ell, lim in xlim.items():
             poles_slice = poles.copy().select(lim)
             if rebin is not None:
-                poles_slice.slice(slice(0, len(poles_slice.k) // rebin * rebin, rebin))
+                poles_slice.slice(slice(0, (len(poles_slice.k) // rebin) * rebin, rebin))
             mock_ells.append(ell)
             mock_edges.append(poles_slice.edges[0])
             mock_x.append(poles_slice.modeavg())
@@ -44,12 +44,14 @@ def load_poles_list(fns, xlim=None, rebin=None):
 
     data = np.mean(list_data, axis=0)
     shotnoise = np.mean(list_shotnoise, axis=0)
+    std = np.std(list_data, axis=0)
 
     toret = dict(data=data,
                  shotnoise=shotnoise,
                  ells=ells,
                  k=x,
-                 edges=edges)
+                 edges=edges,
+                 std=std)
     
     return toret
 
@@ -85,10 +87,12 @@ def load_corr_list(fns, ells=(0, 2, 4), xlim=None, rebin=None):
         list_data.append(np.concatenate(mock_data))
 
     data = np.mean(list_data, axis=0)
-
+    std = np.std(list_data, axis=0)
+    
     toret = dict(data=data,
                  ells=ells,
                  sep=x,
-                 edges=edges)
+                 edges=edges,
+                 std=std)
     
     return toret
