@@ -48,65 +48,49 @@ def read_xi_cov(tracer="LRG", region="GCcomb", version="0.6", zmin=0.4, zmax=0.6
 #    cov = np.cov(poles_list_nonan, rowvar=False, ddof=1)
 #    return cov
 
-def get_EZmocks_covariance(stat, tracer, zrange=None, region='GCcomb', completeness=True, ells=[0, 2, 4], rebin=None, rpcut=0., thetacut=0., return_x=False, hartlap=True):
+def get_EZmocks_covariance(stat, tracer, zrange=None, region='GCcomb', completeness=True, ells=[0, 2, 4], select=None, rpcut=0., thetacut=0., return_x=False, hartlap=True):
     from desi_file_manager import DESIFileName
-
-    if rebin is None:
-        rebin = 1
 
     if 'pk' in stat:
         from pypower import PowerSpectrumMultipoles
-        pk_list = []
+        poles_list = []
         for i in range(1, 1001):
-            try:
-                pk_list.append(PowerSpectrumMultipoles.load(DESIFileName().set_default_config(mocktype='SecondGenMocks/EZmock', version='v1', ftype='allcounts' if stat=='xi' else 'pkpoles', tracer=tracer, zrange=zrange, completeness=completeness).get_path(realization=i, region=region,  thetacut=thetacut)))
-            except:
-                None
-        print(len(pk_list))
-        lk = len(pk_list[0].k)
-        print(lk)
-        #pk_list = [CatalogFFTPower.load(DESIFileName().set_default_config(mocktype='SecondGenMocks/EZmock', version='v1', ftype='allcounts' if stat=='xi' else 'pkpoles', tracer=tracer, zrange=zrange, completeness=completeness).get_path(realization=i, region=region,  thetacut=thetacut)) for i in range(1, 1001)]
-        poles_list = [pk_list[i][0:(lk // rebin) * rebin:rebin](ell=ells, complex=False) for i in range(len(pk_list))]
-        k = pk_list[0][0:(lk // rebin) * rebin:rebin].k
-        # remove nan
-        mask = (k <= np.nanmax(k))
-        poles_list_nonan = [np.array([poles_list[i][ill][mask] for ill in range(len(ells))]).flatten() for i in range(len(pk_list))]
-        cov = np.cov(poles_list_nonan, rowvar=False, ddof=1)
+            pk = PowerSpectrumMultipoles.load(DESIFileName().set_default_config(mocktype='SecondGenMocks/EZmock', version='v1', ftype='allcounts' if stat=='xi' else 'pkpoles', tracer=tracer, zrange=zrange, completeness=completeness).get_path(realization=i, region=region,  thetacut=thetacut))
+            poles = pk.select(select)(ell=ells, complex=False).ravel()
+            k = pk.k
+            poles_list.append(poles)
+        cov = np.cov(poles_list, rowvar=False, ddof=1)
 
         # Hartlap correction
         if hartlap:
-            nmocks = len(pk_list)
-            nk = len(k[mask])
+            nmocks = len(poles_list)
+            nk = len(k)
             hartlap = (nmocks - nk*len(ells) - 2) / (nmocks - 1)
             cov /= hartlap
             
         if return_x:
-            return k[mask], cov
+            return k, cov
 
     elif stat=='xi':
         from pycorr import TwoPointCorrelationFunction
         
-        corr_list = []
+        xi_list = []
         for i in range(1, 1001):
-            try:
-                corr_list.append(TwoPointCorrelationFunction.load(DESIFileName().set_default_config(mocktype='SecondGenMocks/EZmock', version='v1', ftype='allcounts' if stat=='xi' else 'pkpoles', tracer=tracer, zrange=zrange, completeness=completeness).get_path(realization=i, region=region, thetacut=thetacut)).rebin(rebin))
-            except:
-                None
-        xi_list = [corr_list[i].get_corr(ell=ells, return_sep=False, ignore_nan=True) for i in range(len(corr_list))]
-        s = corr_list[0].sepavg()
-        # remove nan
-        mask = (s >= np.nanmin(s))
-        xi_list_nonan = np.array([np.array([xi_list[i][ill][mask] for ill in range(len(ells))]).flatten() for i in range(len(corr_list))])
-        cov = np.cov(xi_list_nonan, rowvar=False, ddof=1)
+            corr = TwoPointCorrelationFunction.load(DESIFileName().set_default_config(mocktype='SecondGenMocks/EZmock', version='v1', ftype='allcounts' if stat=='xi' else 'pkpoles', tracer=tracer, zrange=zrange, completeness=completeness).get_path(realization=i, region=region, thetacut=thetacut))
+            xi = corr.select(select).get_corr(ell=ells, return_sep=False, ignore_nan=True).ravel()
+            s = corr.sepavg()
+            xi_list.append(xi)
+        cov = np.cov(xi_list, rowvar=False, ddof=1)
         
         # Hartlap correction
         if hartlap:
-            nmocks = len(corr_list)
-            ns = len(s[mask])
+            nmocks = len(xi_list)
+            ns = len(s)
             hartlap = (nmocks - ns*len(ells) - 2) / (nmocks - 1)
             cov /= hartlap
-                
-            return s[mask], cov
+        
+        if return_x:
+            return s, cov
     
     return cov
 
@@ -133,13 +117,13 @@ def plot_corrcoef(cov, ells, k, norm=None):
     fig, lax = plt.subplots(nrows=nells, ncols=nells, sharex=False, sharey=False, figsize=(5, 4), squeeze=False)
     #fig.subplots_adjust(wspace=0.1, hspace=0.1)
 
-    #from matplotlib import colors
-    #norm = colors.TwoSlopeNorm(vmin=-1, vcenter=0., vmax=1) if norm is None else norm
+    from matplotlib import colors
+    norm = colors.TwoSlopeNorm(vmin=-1, vcenter=0., vmax=1) if norm is None else norm
 
     for i in range(nells):
         for j in range(nells):
             ax = lax[nells-1-i][j]
-            mesh = ax.pcolor(k, k, corrcoef[i*nk:(i+1)*nk,j*nk:(j+1)*nk].T, norm=norm, cmap=plt.get_cmap('RdBu'))
+            mesh = ax.pcolor(k, k, corrcoef[i*nk:(i+1)*nk,j*nk:(j+1)*nk].T, norm=None, cmap=plt.get_cmap('RdBu'))
             if i>0: ax.xaxis.set_visible(False)
             else: ax.set_xlabel(r'$k$  [$h$/Mpc]')
             if j>0: ax.yaxis.set_visible(False)
@@ -148,8 +132,9 @@ def plot_corrcoef(cov, ells, k, norm=None):
             ax.text(0.05, 0.95, text, horizontalalignment='left', verticalalignment='top', transform=ax.transAxes, color='black')
             ax.grid(False)
         
-    fig.subplots_adjust(right=0.8)
-    cbar_ax = fig.add_axes([1.01, 0.14, 0.03, 0.82])
+    fig.subplots_adjust(left=0.15, right=0.85, bottom=0.15)
+    cbar_ax = fig.add_axes([0.875, 0.15, 0.02, 0.8])
     cbar = fig.colorbar(mesh, cax=cbar_ax)
-    cbar.set_label(r'$r$', rotation=90)
+    cbar.set_label(r'$r$', rotation=0)
+    plt.subplots_adjust(wspace=0.1, hspace=0.1)
     return lax
