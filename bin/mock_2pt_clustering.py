@@ -43,7 +43,7 @@ def select_data(mockgen='second', catalog=None, version='v3', imock=0, nrandoms=
             data = select_region(region, data, zrange=zrange)
             return data, None
                     
-        elif 'v3' in version:
+        elif 'v' in version:
             if (completeness == 'altmtl') | (completeness == ''):
                 catalog_dir = '/global/cfs/cdirs/desi/survey/catalogs/Y1/mocks/SecondGenMocks/AbacusSummit_{}/altmtl{:d}/mock{:d}/LSScats'.format(version, imock, imock)
             elif completeness == 'ffa':
@@ -58,14 +58,7 @@ def select_data(mockgen='second', catalog=None, version='v3', imock=0, nrandoms=
             
             data = {region: Catalog.read(data_fn)}
             randoms = {region: Catalog.concatenate([Catalog.read(randoms_fn.format(ranidx)) for ranidx in range(0, nrandoms)])}            
-            
-        else:
-            GC = '' if region == 'GCcomb' else '_{}'.format(region)
-            data_fn = os.path.join(catalog_dir, '{}_{}{}_clustering.dat.fits'.format(tracer, '' if ((not completeness) or completeness=='ffa') else 'complete_gtlimaging', GC))
-            randoms_fn = os.path.join(catalog_dir, '{}_{}{}_{{:d}}_clustering.ran.fits'.format(tracer, '' if ((not completeness) or completeness=='ffa') else 'complete_gtlimaging', GC))
-            data = {region: Catalog.read(data_fn)}
-            randoms = {region: Catalog.concatenate([Catalog.read(randoms_fn.format(ranidx)) for ranidx in range(0, nrandoms)])}
-               
+                
     if 'raw' in mockgen:
         catalog_dir = '/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/rawcutsky'
         data_fn = os.path.join(catalog_dir, 'SeconGen_mock_{}_{}_Y1.fits'.format(tracer, imock))
@@ -114,19 +107,18 @@ def get_rdd(catalog, cosmo=fiducial.DESI(), zcol='Z'):
     return [ra, dec, cosmo.comoving_radial_distance(z)]
 
 
-def compute_power(data, randoms, edges, output_name, ells=(0, 2, 4), rpcut=0, thetacut=0, direct_edges=None, direct_attrs=None, los='firstpoint', boxsize=9000, nmesh=1500, cellsize=6, resampler='tsc'):
+def compute_power(data, randoms, edges, output_name, ells=(0, 2, 4), weighting='default_FKP', rpcut=0, thetacut=0, direct_edges=None, direct_attrs=None, los='firstpoint', boxsize=9000, nmesh=1500, cellsize=6, resampler='tsc', interlacing=3):
     randoms_positions = get_rdd(randoms)
     data_positions = get_rdd(data)
 
-    # NB: convert weights to float (if weight type is integer then PIP weights are automatically computed)
-    if 'WEIGHT' in data.columns():
-        data_weights = data['WEIGHT'].astype('f8')
-    else:
-        data_weights = None
-    if 'WEIGHT' in randoms.columns():
-        randoms_weights = randoms['WEIGHT'].astype('f8')
-    else:
-        randoms_weights = None
+    data_weights = np.ones(len(data_positions[0]), dtype='f8')
+    randoms_weights = np.ones(len(randoms_positions[0]), dtype='f8')
+    if 'default' in weighting:
+        data_weights *= data['WEIGHT']
+        randoms_weights *= randoms['WEIGHT']
+    if 'FKP' in weighting:
+        data_weights *= data['WEIGHT_FKP']
+        randoms_weights *= randoms['WEIGHT_FKP']        
     
     if rpcut:
         direct_selection_attrs = {'rp': (0, rpcut)}
@@ -136,13 +128,15 @@ def compute_power(data, randoms, edges, output_name, ells=(0, 2, 4), rpcut=0, th
         direct_selection_attrs = None
      
     print('CatalogFFTPower')
+    t0 = time.time()
     power = CatalogFFTPower(data_positions1=data_positions, randoms_positions1=randoms_positions,
                             data_weights1=data_weights, randoms_weights1=randoms_weights,
                             position_type='rdd', edges=edges, ells=ells, los=los,
-                            boxsize=boxsize, cellsize=cellsize, resampler=resampler, interlacing=3,
+                            boxsize=boxsize, cellsize=cellsize, resampler=resampler, interlacing=interlacing,
                             direct_selection_attrs=direct_selection_attrs, direct_attrs=direct_attrs, direct_edges=direct_edges)
-    
-    print('Save power spectrum')
+    print('Power computed in elapsed time: {:.2f} s'.format(time.time() - t0))
+
+    print('Saving power spectrum {}.'.format(output_name))
     power.save(output_name)
     
     
@@ -186,8 +180,10 @@ def main():
     parser.add_argument('--rpcut', type=float, required=False, default=0)
     parser.add_argument('--thetacut', type=float, required=False, default=0)
     parser.add_argument('--direct', type=bool, required=False, default=False)
+    parser.add_argument('--directmax', type=float, required=False, default=5000)
     parser.add_argument('--nrandoms', type=int, required=False, default=1)
-    parser.add_argument('--cellsize', type=int, required=False, default=6)
+    parser.add_argument('--cellsize', type=float, required=False, default=6)
+    parser.add_argument('--boxsize', type=float, required=False, default=9000)
     parser.add_argument('--weights', type=str, required=False, default='WEIGHT')
     parser.add_argument('--zmin', type=float, required=False, default=None)
     parser.add_argument('--zmax', type=float, required=False, default=None)
@@ -210,8 +206,10 @@ def main():
     rpcut = args.rpcut
     thetacut = args.thetacut
     direct = args.direct
+    directmax = args.directmax
     nrandoms = args.nrandoms
     cellsize = args.cellsize
+    boxsize = args.boxsize
     weights = args.weights
     zmin = args.zmin
     zmax = args.zmax
@@ -226,16 +224,21 @@ def main():
         zmax = zrange[tracer[:3]][1]
     
     data, randoms = select_data(mockgen=mockgen, version=version, catalog=sample, imock=imock, nrandoms=nrandoms, tracer=tracer, region=region, completeness=completeness, zrange=(zmin, zmax))
+    #print('data : {}'.format(data.size))
+    #print('randoms : {}'.format(randoms.size))
+    #sys.exit()
     mpicomm = data.mpicomm
     
     t0 = time.time()
 
     if todo=='power':
+        ells = [0, 2, 4]
         edges = {'min': 0., 'step': 0.001}
-        direct_edges = {'step': 0.1, 'min': 0.} if direct else None
+        direct_edges = {'step': 0.1, 'min': 0., 'max': directmax} if direct else None
         direct_attrs = {'nthreads': 64} if direct else None
+        kwargs = {'resampler': 'tsc', 'interlacing': 3, 'boxsize': boxsize, 'cellsize': cellsize, 'los': 'firstpoint', 'weighting': 'default_FKP'}
 
-        if "cubic" in data_shortname:
+        if "cubic" in mockgen:
             output_dir = "/global/cfs/cdirs/desi/users/mpinon/cubicSecondGenMocks/pk"
             for los in 'xyz':
                 output_fn = LocalFileName().set_default_config(mockgen='cubic', tracer=tracer).get_path(fdir=output_dir, realization=imock, los=los, z=z, nmesh=None, cellsize=6, boxsize=2000)
@@ -244,10 +247,10 @@ def main():
                 compute_power_cubic(data, z, edges, output_fn, los=los)
             
         else:
-            output_fn = os.path.join(output_dir, 'pk', naming(filetype='power', data_type=data_shortname, imock=imock, tracer=tracer, completeness=completeness, region=region, cellsize=cellsize, rpcut=rp_cut, thetacut=theta_cut, direct_edges=direct))
+            output_fn = LocalFileName().set_default_config(mockgen=mockgen, version=version, tracer=tracer, region=region, zrange=(zmin, zmax), completeness=completeness, weighting=kwargs['weighting'], rpcut=rpcut, thetacut=thetacut, nran=nrandoms, cellsize=cellsize, boxsize=boxsize, directedges=(bool(rpcut) or bool(thetacut)) and direct, directmax=directmax)
             print('Compute power spectrum')
             #os.environ['OMP_NUM_THREADS'] = '4'
-            compute_power(data, randoms, edges, output_fn, rpcut=rp_cut, thetacut=theta_cut, direct_edges=direct_edges, cellsize=cellsize)
+            compute_power(data, randoms, edges, output_fn.get_path(), rpcut=rpcut, thetacut=thetacut, direct_edges=direct_edges, direct_attrs=direct_attrs, **kwargs)
         
     if todo=='corr':
         if rp_cut:
