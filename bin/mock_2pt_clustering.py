@@ -176,7 +176,7 @@ def main():
     parser.add_argument('--tracer', type=str, required=False, default='ELG')
     parser.add_argument('--region', type=str, required=False, default='NGC', choices=['NGC', 'SGC', 'N', 'S', 'GCcomb'])
     parser.add_argument('--completeness', type=str, required=False, default='complete', choices=['complete', 'altmtl', 'ffa', ''])
-    parser.add_argument('--todo', type=str, required=False, default='power', choices=['power', 'corr', 'window', 'wmatrix', 'counter', 'counter_rp', 'counter_theta', 'counter_rr', 'zcosmo', ''])
+    parser.add_argument('--todo', type=str, required=False, default='power', choices=['power', 'corr', 'window', 'wmatrix', 'counter', 'counter_rp', 'counter_theta_dd', 'counter_theta_rr', 'counter_smu_rr', 'counter_rppi_rr', 'zcosmo', ''])
     parser.add_argument('--rpcut', type=float, required=False, default=0)
     parser.add_argument('--thetacut', type=float, required=False, default=0)
     parser.add_argument('--direct', type=bool, required=False, default=False)
@@ -329,8 +329,8 @@ def main():
 
     if 'counter' in todo:
         
-        ## DD counts as a function of theta
-        if 'theta' in todo:
+        ## DD counts
+        if 'dd' in todo:
             
             if mockgen == 'second':
                 if bool(weights):
@@ -352,7 +352,7 @@ def main():
             output_fn = '{}ddcounts_theta_mock{:d}_{}_{}{}_{}{}thetamax10'.format((sample+'_') if sample is not None else '', imock, tracer, completeness+'_' if bool(completeness) else '', region, zinfo, weights + ('_' if weights else ''))
             print('Saving DD counts: {}'.format(output_fn))
             
-        ## RR counts as a function of theta
+        ## RR counts
         elif 'rr' in todo:
             print('randoms size 4:', randoms.size)
             np.random.seed(0)
@@ -364,21 +364,42 @@ def main():
             else:
                 print('No weights.')
                 
-            xi = TwoPointCounter('theta', edges=np.logspace(-3, 1., 41), 
-                                 positions1=np.array([randoms['RA'][downsampmask], randoms['DEC'][downsampmask]]), weights1=randoms[weights][downsampmask].astype('f8') if bool(weights) else None,
-                                 los='midpoint', engine='corrfunc', position_type='rd', nthreads=64, mpicomm=data.mpicomm, dtype='f8')
-            
-            zinfo = '{:.1f}_{:.1f}_'.format(zmin, zmax)
-            output_fn = '{}rrcounts_theta_mock{:d}_{}_{}{}_{}{}thetamax10'.format((sample+'_') if sample is not None else '', imock, tracer, completeness+'_' if bool(completeness) else '', region, zinfo, weights + ('_' if weights else ''))
-            print('Saving RR counts: {}'.format(output_fn))
-            
+            if 'theta' in todo:
+                xi = TwoPointCounter('theta', edges=np.logspace(-3, 1., 41), 
+                                     positions1=np.array([randoms['RA'][downsampmask], randoms['DEC'][downsampmask]]), weights1=randoms[weights][downsampmask].astype('f8') if bool(weights) else None,
+                                     los='midpoint', engine='corrfunc', position_type='rd', nthreads=64, mpicomm=data.mpicomm, dtype='f8')
+
+                zinfo = '{:.1f}_{:.1f}_'.format(zmin, zmax)
+                output_fn = '{}rrcounts_theta_mock{:d}_{}_{}{}_{}{}thetamax10'.format((sample+'_') if sample is not None else '', imock, tracer, completeness+'_' if bool(completeness) else '', region, zinfo, weights + ('_' if weights else ''))
+                print('Saving RR counts: {}'.format(output_fn))
+                
+            elif 'smu' in todo:
+                xi = TwoPointCounter('smu', edges=(np.linspace(0., 1, 1001), np.linspace(-1., 1., 201)), 
+                                     positions1=np.array(get_rdd(randoms))[:, downsampmask], 
+                                     weights1=randoms[weights][downsampmask].astype('f8') if bool(weights) else None,
+                                     los='midpoint', engine='corrfunc', position_type='rdd', nthreads=64, mpicomm=data.mpicomm, dtype='f8')
+
+                zinfo = '{:.1f}_{:.1f}_'.format(zmin, zmax)
+                output_fn = '{}rrcounts_smu_mock{:d}_{}_{}_{}_{}{}smax1'.format((sample+'_') if sample is not None else '', imock, tracer, completeness, region, zinfo, weights + ('_' if weights else ''))
+                print('Saving RR counts: {}'.format(output_fn))
+
+            elif 'rp' in todo:
+                xi = TwoPointCounter('rppi', edges=(np.linspace(0., 1, 1001), np.linspace(-80., 80., 161)), 
+                                     positions1=np.array(get_rdd(randoms))[:, downsampmask], 
+                                     weights1=randoms[weights][downsampmask].astype('f8') if bool(weights) else None,
+                                     los='midpoint', engine='corrfunc', position_type='rdd', nthreads=64, mpicomm=data.mpicomm, dtype='f8')
+
+                zinfo = '{:.1f}_{:.1f}_'.format(zmin, zmax)
+                output_fn = '{}rrcounts_rppi_mock{:d}_{}_{}_{}_{}{}rpmax1'.format((sample+'_') if sample is not None else '', imock, tracer, completeness, region, zinfo, weights + ('_' if weights else ''))
+                print('Saving RR counts: {}'.format(output_fn))
+                
         else:
             smax = 4
             xi = TwoPointCounter('rppi', edges=(np.linspace(0., smax, 401), np.linspace(-80., 80., 81)),
                  positions1=np.array(get_rdd(data)), weights1=data['WEIGHT'].astype('f8'),
                  los='midpoint', engine='corrfunc', position_type='rdd', nthreads=64, mpicomm=data.mpicomm, dtype='f8')
 
-            output_fn = 'DD_rppi_mock{:d}_{}_{}{}_{:.1f}_{:.1f}_smax4'.format(imock, tracer, 'complete_' if completeness else 'ffa_', region, zmin, zmax)
+            output_fn = 'ddcounts_rppi_mock{:d}_{}_{}{}_{:.1f}_{:.1f}_smax4'.format(imock, tracer, 'complete_' if completeness else 'ffa_', region, zmin, zmax)
         
         xi.save(os.path.join(output_dir, 'paircounts', output_fn))
 
