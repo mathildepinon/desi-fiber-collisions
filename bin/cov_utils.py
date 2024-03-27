@@ -114,7 +114,7 @@ def plot_corrcoef(cov, ells, k, norm=None):
     nk = len(k)
     nells = len(ells)
 
-    fig, lax = plt.subplots(nrows=nells, ncols=nells, sharex=False, sharey=False, figsize=(5, 4), squeeze=False)
+    fig, lax = plt.subplots(nrows=nells, ncols=nells, sharex=False, sharey=False, figsize=(5, 4.5), squeeze=False)
     #fig.subplots_adjust(wspace=0.1, hspace=0.1)
 
     from matplotlib import colors
@@ -129,7 +129,8 @@ def plot_corrcoef(cov, ells, k, norm=None):
             if j>0: ax.yaxis.set_visible(False)
             else: ax.set_ylabel(r'$k$  [$h$/Mpc]')
             text = r'{} $\times$ {}'.format(r'$\ell={}$'.format(ells[j % nells]), r'$\ell={}$'.format(ells[i]))
-            ax.text(0.05, 0.95, text, horizontalalignment='left', verticalalignment='top', transform=ax.transAxes, color='black')
+            props = dict(facecolor='white', alpha=0.5, edgecolor='white', boxstyle="Round, pad=0.2")
+            ax.text(0.06, 0.95, text, horizontalalignment='left', verticalalignment='top', transform=ax.transAxes, color='black', fontsize=12, bbox=props)
             ax.grid(False)
         
     fig.subplots_adjust(left=0.15, right=0.85, bottom=0.15)
