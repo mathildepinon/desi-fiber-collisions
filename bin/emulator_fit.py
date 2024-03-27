@@ -8,7 +8,6 @@ from desi_file_manager import DESIFileName
 from cov_utils import truncate_cov, read_xi_cov, get_EZmocks_covariance
 from utils import load_poles_list
 
-#zrange = {'ELG': (0.8, 1.6), 'LRG':(0.4, 1.1), 'QSO':(0.8, 3.5)}
 
 def get_footprint(catalog="second", version='v3', tracer='ELG', region='NGC', completeness='', zrange=None):
     import healpy as hp
@@ -62,7 +61,7 @@ def get_template(template_name='standard', z=0.8, klim=None):
     return template
 
 
-def get_theory(theory_name='velocileptors', observable_name='power', b1E=1.9, template=None, recon=None, freedom=None, ells=(0, 2, 4)):
+def get_theory(theory_name='velocileptors', observable_name='power', b1E=1.9, template=None, recon=None, freedom=None, tracer=None, ells=(0, 2, 4)):
 
     """A simple wrapper that returns the theory of interest."""
 
@@ -85,6 +84,7 @@ def get_theory(theory_name='velocileptors', observable_name='power', b1E=1.9, te
         #kwargs.update(mu=3)  # using 3 mu points in [0, 1] to reproduce FOLPS, by default it is 6
     elif 'velo' in theory_name:
         Theory = LPTVelocileptorsTracerPowerSpectrumMultipoles if observable_name == 'power' else LPTVelocileptorsTracerCorrelationFunctionMultipoles
+        kwargs.update(prior_basis='standard', use_Pzel=True)
     elif 'lptm' in theory_name:
         Theory = LPTMomentsVelocileptorsTracerPowerSpectrumMultipoles if observable_name == 'power' else LPTMomentsVelocileptorsTracerCorrelationFunctionMultipoles
     elif 'eptm' in theory_name:
@@ -101,6 +101,8 @@ def get_theory(theory_name='velocileptors', observable_name='power', b1E=1.9, te
 
     if freedom is not None:
         kwargs.update(freedom=freedom)
+    if tracer is not None:
+        kwargs.update(tracer=tracer[:3])
     theory = Theory(template=template, **kwargs)
     # Changes to theory.init.params will remain whatever pipeline is built
     b1 = float(euler) + b1E - 1.
@@ -147,7 +149,7 @@ def get_fit_setup(tracer, ells=None, observable_name='power', theory_name='veloc
             slim = {ell: [50., 150., 4.] for ell in ells}
         else:
             klim = {ell: [0.02, 0.2, 0.005] for ell in ells}
-            slim = {ell: [27., 150., 4.] for ell in ells}
+            slim = {ell: [30., 150., 4.] for ell in ells}
         sigmapar, sigmaper = 8.5, 4.5
         if post: sigmapar, sigmaper = 6., 3.
     if tracer.startswith('QSO'):
@@ -181,20 +183,26 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
         # cubic mocks
         if 'cubic' in catalog:
             wmatrix = None
-            # klim = {ell: [0.02, 0.35, 0.005] for ell in [0, 2, 4]}
+            #xlim = {ell: [0.02, 0.35, 0.005] for ell in [0, 2, 4]}
             # my own files
             if source == 'local':
-                data_fn = LocalFileName().set_default_config(mockgen='cubic', tracer=tracer, region=region, realization=imock if imock is not None else '*', los='*', z=z)
+                data_fn = LocalFileName().set_default_config(mockgen='cubic', tracer=tracer, region=region, 
+                                                             realization=imock if imock is not None else '*', los='[a-z]', z=z)
             # from desipipe
             elif source == 'desi':
-                data_fn = DESIFileName().set_default_config(mocktype='SecondGenMocks/CubicBox', tracer=tracer, zrange=z, realization=imock if imock is not None else '*', los='*')
+                data_fn = DESIFileName().set_default_config(mocktype='SecondGenMocks/CubicBox', version=version, tracer=tracer, zrange=z, 
+                                                            realization=imock if imock is not None else '*', los='[a-z]')
 
         # cutsky mocks or data
         else:
             # from desipipe        
             if source == 'desi':
-                wm_fn = DESIFileName().set_default_config(version=version, ftype='wmatrix_smooth', tracer=tracer, region=region, completeness=completeness, zrange=zrange, realization='merged')
-                data_fn = DESIFileName().set_default_config(version=version, tracer=tracer, region=region, completeness=completeness, zrange=zrange, realization=imock if imock is not None else '*')
+                wm_fn = DESIFileName().set_default_config(version=version, ftype='wmatrix_smooth', tracer=tracer, region=region, 
+                                                          completeness=completeness, zrange=zrange, realization='merged',
+                                                          baseline=False, weighting='_default_FKP_lin', nran=18, cellsize=6, boxsize=9000)
+                data_fn = DESIFileName().set_default_config(version=version, tracer=tracer, region=region, 
+                                                            completeness=completeness, zrange=zrange, realization=imock if imock is not None else '*',
+                                                            baseline=False, weighting='_default_FKP_lin', nran=18, cellsize=6, boxsize=9000)
             # my own files
             elif source == 'local':
                 wm_fn = LocalFileName().set_default_config(mockgen=catalog, ftype='wmatrix_smooth', tracer=tracer, region=region, completeness=completeness, realization=0 if catalog=='first' else None, directedges=(bool(rpcut) or bool(thetacut)) and direct)
@@ -210,14 +218,14 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
 
         if not sculpt_window:
             if covtype == 'analytic':
-                cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/cov_gaussian_pre_{}_{}_{:.1f}_{:.1f}_default_FKP_lin.txt'.format(tracer, region, zrange[0], zrange[1])
+                cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_gaussian_pre_{}_{}_{:.1f}_{:.1f}_default_FKP_lin.txt'.format(tracer, region, zrange[0], zrange[1])
                 cov = np.loadtxt(cov_fn)
-                cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*lim[0]))
-            elif covtype == 'ezmocks':
+                cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*xlim[0]))
+            elif 'ezmocks' in covtype:
                 print('EZmocks covariance.')
-                cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_{}_EZmocks_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}{}.npy'.format(tracer[:7], region, zrange[0], zrange[1], xlim[0][0], xlim[0][1], '_thetacut{:.2f}'.format(thetacut) if thetacut else '')
+                cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}.npy'.format(tracer[:7], region, zrange[0], zrange[1], xlim[0][0], xlim[0][1], '_thetacut{:.2f}'.format(thetacut) if thetacut and (covtype=='ezmocks') else '')
                 if not os.path.isfile(cov_fn):
-                    cov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=xlim[0], rpcut=rpcut, thetacut=thetacut, return_x=False)
+                    cov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=xlim[0], rpcut=rpcut, thetacut=thetacut if (covtype=='ezmocks') else 0, return_x=False)
                     np.save(cov_fn, cov)
                 else:
                     print('Loading EZmocks covariance: {}'.format(cov_fn))
@@ -228,27 +236,28 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             from sculpt_window import SculptWindow
 
             sculpt_dir = os.path.join("/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/sculpt_window".format(version))
-            sculptwm_fn = LocalFileName().set_default_config(ftype='sculpt_all', tracer=tracer, region=region, completeness=completeness, realization=None, weighting=None, rpcut=rpcut, thetacut=thetacut, zrange=zrange, covtype='analytic')
+            sculptwm_fn = LocalFileName().set_default_config(ftype='rotated_all', tracer=tracer, region=region, completeness=completeness, realization=None, weighting=None, rpcut=rpcut, thetacut=thetacut, zrange=zrange)
             sculptwm_fn.update(fdir=sculpt_dir, cellsize=None, boxsize=None, directedges=False)
+            print('rotated window path:', sculptwm_fn.get_path())
             sculptwm = SculptWindow.load(sculptwm_fn.get_path())
 
             wmatrix = sculptwm.wmatrixnew
-            wmatrix.select_x(xinlim=kinlim)
-            wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // kinrebin * kinrebin, kinrebin))
+            wmatrix.select_x(xinlim=xinlim)
+            wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // xinrebin * xinrebin, xinrebin))
 
             mmatrix = sculptwm.mmatrix
             mo = sculptwm.mo
-            if covtype == 'ezmocks':
-                cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}{}.npy'.format(tracer[:7], region, zrange[0], zrange[1], 0., 0.4, '_thetacut{}'.format(thetacut) if thetacut else '')
+            if 'ezmocks' in covtype:
+                cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}.npy'.format(tracer[:7], region, zrange[0], zrange[1], 0., 0.4, '_thetacut{}'.format(thetacut) if thetacut else '')
                 if not os.path.isfile(cov_fn):
                     ezcov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=(0., 0.4, 0.005), rpcut=rpcut, thetacut=thetacut, return_x=False)
                     np.save(cov_fn, ezcov)
                 else:
                     ezcov = np.load(cov_fn)
-                cov = np.matmul(mmatrix, ezcov)
+                cov = np.matmul(np.matmul(mmatrix, ezcov), mmatrix.T)
             else:
                 cov = sculptwm.covnew
-                cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*xlim[0]))
+            cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*xlim[0]))
 
             ells = (0, 2, 4)
             power = load_poles_list([data_fn.get_path(realization=i).format(i) for i in range(25)], xlim={ell: (0, 0.4, 0.005) for ell in ells})
@@ -256,22 +265,24 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             mask = (np.arange(0, 0.4, 0.005) >= xlim[0][0]) & (np.arange(0, 0.4, 0.005) < xlim[0][1])
             mask_flat = np.concatenate((mask, )*len(ells))
             data = data[mask_flat]
-
+            shotnoise = np.mean(np.matmul(mmatrix, np.full_like(power['data'].flatten(), power['shotnoise'])))
             systematic_templates = SystematicTemplatePowerSpectrumMultipoles(templates=[mo[0][mask_flat], mo[1][mask_flat], mo[2][mask_flat]])
 
         else:
-            systematic_templates = None
             data = data_fn.get_path()
+            shotnoise = None
+            systematic_templates = None
             
     if observable_name == 'corr':
         
         wmatrix = None
+        shotnoise = None
         systematic_templates = None
         
         if not 'cubic' in catalog:
             # from desipipe
             if source == 'desi':
-                data_fn = DESIFileName().set_default_config(ftype='allcounts', version=version, tracer=tracer, region=region, completeness=completeness, zrange=zrange, realization=imock if imock is not None else '*')
+                data_fn = DESIFileName().set_default_config(ftype='allcounts', version=version, tracer=tracer, region=region, completeness=completeness, zrange=zrange, realization=imock if imock is not None else '*', baseline=True, rpcut=rpcut, thetacut=thetacut)
                 data = data_fn.get_path()
             else: raise ValueError('Unsupported source: {}'.format(source))
         else: raise ValueError('Unsupported catalog type: {}'.format(catalog))
@@ -288,17 +299,20 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
                 print('Loading EZmocks covariance: {}'.format(cov_fn))
                 cov = np.load(cov_fn)
 
-    return data, wmatrix, cov, systematic_templates
+    return data, wmatrix, cov, systematic_templates, shotnoise
 
 
-def get_observable_likelihood(observable_name='power', theory_name='velocileptors', template_name='shapefitqisoqap', solve=True, sculpt_window=False, systematic_priors=None, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), **kwargs):
+def get_observable_likelihood(observable_name='power', theory_name='velocileptors', template_name='shapefitqisoqap', solve=True, sculpt_window=False, fixed_sn=False, systematic_priors=None, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), **kwargs):
 
     from desilike.observables.galaxy_clustering import TracerPowerSpectrumMultipolesObservable, TracerCorrelationFunctionMultipolesObservable
     from desilike.likelihoods import ObservablesGaussianLikelihood
             
     b0, xlim, sigmas = get_fit_setup(kwargs['tracer'], theory_name=theory_name, observable_name=observable_name)
     
-    data, wmatrix, cov, systematic_templates = get_fit_data(observable_name=observable_name, sculpt_window=sculpt_window, xlim=xlim, **kwargs)
+    if kwargs['catalog']=='cubic':
+        xlim = {ell: (0.02, 0.35, 0.005) for ell in [0, 2, 4]}
+     
+    data, wmatrix, cov, systematic_templates, shotnoise = get_fit_data(observable_name=observable_name, sculpt_window=sculpt_window, xlim=xlim, **kwargs)
     
     if isinstance(data, (tuple, list)):
         dd = data[0]
@@ -316,7 +330,7 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
     b1E = b0 / fiducial.growth_factor(z)
     
     # Load theory
-    theory = get_theory(theory_name=theory_name, observable_name=observable_name, template=None, b1E=b1E, ells=xlim.keys())
+    theory = get_theory(theory_name=theory_name, observable_name=observable_name, template=None, b1E=b1E, ells=xlim.keys(), tracer=kwargs['tracer'], freedom='max')
     if 'bao' in theory_name:
         if save_emulator:
             raise ValueError('No need to build an emulator for the BAO model!')
@@ -336,27 +350,28 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
     # when sculpting window with rp/theta-cut
     if sculpt_window:
         if systematic_priors is not None:
-            profiles_dir = os.path.join('/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}'.format(version), 'profiles', 'profiles_{}_{}_{}{}'.format(template_name, kwargs['tracer'], kwargs['completeness']+'_', region))
+            ells = [0, 2, 4]
+            profiles_dir = os.path.join('/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}'.format(kwargs['version']), 'profiles', 'profiles_{}_{}_{}_{}_{}_{}'.format(template_name, kwargs['tracer'], kwargs['zrange'][0], kwargs['zrange'][1], kwargs['completeness'], kwargs['region']))
             if kwargs['rpcut']: cutflag = '_rpcut{:.1f}'.format(kwargs['rpcut']) 
             elif kwargs['thetacut']: cutflag = '_thetacut{:.2f}'.format(kwargs['thetacut'])
             else: cutflag = ''
             
             from desilike.samples import Profiles
-            profile_cutsky = Profiles.load(os.path.join(profiles_dir, 'power_velocileptors{}_sculptwindow_fixedsn.npy'.format(cutflag)))
-            #fid_priors = [-385, 26, 5] #[-142, 30, 5] # for local second gen v1
-            fid_priors = [profile_cutsky.bestfit['syst_{}'.format(i)][0] for i in range(len(ells))] #[-57.42022851, 26.86288818, -3.8576213] #[-271, 25, 15] #[455, -4, 9] # for desi second gen v3
+            profile_cutsky = Profiles.load(os.path.join(profiles_dir, 'power_velocileptors_{}cov{}_sculptwindow_fixedsn.npy'.format('analytic', cutflag)))
+            fid_priors = [profile_cutsky.bestfit['syst_{}'.format(i)][0] for i in range(len(ells))]
             for i in range(len(ells)):
-                systematic_templates.init.params['syst_{}'.format(i)].update(prior=dict(dist='norm', loc=priors*fid_priors[i], scale=priors*fid_priors[i]), derived='.best')    
+                systematic_templates.init.params['syst_{}'.format(i)].update(prior=dict(dist='norm', loc=fid_priors[i], scale=systematic_priors*fid_priors[i]), derived='.best')    
         
     else:
         systematic_templates = None
         
     if observable_name == 'power': 
         observable = TracerPowerSpectrumMultipolesObservable(klim=xlim,
-                                                             #kin=np.arange(0.001, 0.35, 0.002),
+                                                             #kin=np.arange(0.001, 0.35, 0.001),
                                                              data=data,
                                                              wmatrix=wmatrix,
                                                              theory=theory,
+                                                             shotnoise=shotnoise,
                                                              systematic_templates=systematic_templates)
         
     if observable_name == 'corr':
@@ -367,10 +382,15 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
 
     likelihood = ObservablesGaussianLikelihood(observables=[observable], covariance=cov)
     
+    fixed_params = []
     if solve and not save_emulator:
         for param in likelihood.all_params.select(basename=['alpha*', 'sn*', 'c*', 'al*']): param.update(derived='.best') # NB: derived='.auto' could shift posterior
         theory.log_info('Use analytic marginalization for {}.'.format(theory.params.names(solved=True)))
-    for param in likelihood.all_params.select(basename=['alpha6']):
+        fixed_params.append('alpha6')
+    if fixed_sn:
+        print('Fixing sn parameters.')
+        fixed_params.append('sn*')
+    for param in likelihood.all_params.select(basename=fixed_params):
         param.update(fixed=True)
     if save_emulator:
         likelihood()
@@ -393,7 +413,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Emulator fit')
     parser.add_argument('--source', type=str, required=False, default='desi', choices=['desi', 'local'])
     parser.add_argument('--catalog', type=str, required=False, default='second', choices=['first', 'second', 'cubic', 'raw', 'data'])
-    parser.add_argument('--version', type=str, required=False, default='v3', choices=['v1', 'v2', 'v3', 'v3_1', 'v4'])
+    parser.add_argument('--version', type=str, required=False, default='v3', choices=['v1', 'v1.1', 'v2', 'v3', 'v3_1', 'v4', 'v4_1'])
     parser.add_argument('--tracer', type=str, required=False, default='ELG')
     parser.add_argument('--region', type=str, required=False, default='SGC', choices=['NGC', 'SGC', 'NS', 'SS', 'GCcomb', ''])
     parser.add_argument('--z', type=float, required=False, default=None)
@@ -409,24 +429,28 @@ if __name__ == '__main__':
     parser.add_argument('--imock', type=int, required=False, default=None)
     parser.add_argument('--covtype', type=str, required=False, default='ezmocks')
     parser.add_argument('--sculpt_window', type=bool, required=False, default=False)
+    parser.add_argument('--fixed_sn', type=bool, required=False, default=False)
     parser.add_argument('--systematic_priors', type=float, required=False, default=None)
     args = parser.parse_args()
+    
+    ktlim = (0.001, 0.35)
+    ktmax_flag = '_ktmax{}'.format(ktlim[1]) if ktlim[1]!=0.35 else ''
     
     theory_dir = 'bao' if 'bao' in args.theory_name else ''
     template_name = 'bao' if args.theory_name == 'dampedbao' else 'shapefitqisoqap'
 
     if args.catalog == 'cubic':
-        output_dir = '/global/cfs/cdirs/desi/users/mpinon/cubicSecondGenMocks/{}/z{:.3f}'.format(args.source, args.z)
+        output_dir = '/global/cfs/cdirs/desi/users/mpinon/cubicSecondGenMocks/{}/v1.1/z{:.3f}'.format(args.source, args.z)
         profiles_dir = os.path.join(output_dir, theory_dir, 'profiles', 'profiles_{}_{}'.format(template_name, args.tracer))
         chains_dir = os.path.join(output_dir, theory_dir, 'chains', 'chains_{}_{}'.format(template_name, args.tracer))
 
     elif args.catalog == 'second':
         output_dir = '/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/'.format(args.version)
-        profiles_dir = os.path.join(output_dir, theory_dir, 'profiles', 'profiles_{}_{}_{}_{}'.format(template_name, args.tracer, args.zmin, args.zmax, args.completeness, args.region))
+        profiles_dir = os.path.join(output_dir, theory_dir, 'profiles', 'profiles_{}_{}_{}_{}_{}_{}'.format(template_name, args.tracer, args.zmin, args.zmax, args.completeness, args.region))
         chains_dir = os.path.join(output_dir, theory_dir, 'chains', 'chains_{}_{}_z{:.3f}-z{:.3f}_{}_{}'.format(template_name, args.tracer, args.zmin, args.zmax, args.completeness, args.region))
     
     footprint_fn=os.path.join(output_dir, 'footprints', 'footprint_{}{}.npy')        
-    emulator_dir = os.path.join(output_dir, theory_dir, 'emulators', 'emulators_{}_{}_z{:.3f}'.format(template_name, args.tracer, args.z))
+    emulator_dir = os.path.join(output_dir, theory_dir, 'emulators', 'emulators_{}_{}_z{:.3f}{}'.format(template_name, args.tracer[:7], args.z, ktmax_flag))
     emulator_fn=os.path.join(emulator_dir, '{}_{{}}.npy'.format(args.observable))
     
     if args.rpcut: cutflag = '_rpcut{:.1f}'.format(args.rpcut)
@@ -434,23 +458,23 @@ if __name__ == '__main__':
     else: cutflag = ''
     
     if 'emulator' in args.todo:
-        get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, covtype=args.covtype, theory_name=args.theory_name, template_name=template_name, save_emulator=True, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
+        get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, covtype=args.covtype, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, save_emulator=True, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
             
     if 'profiling' in args.todo:
         from desilike.profilers import MinuitProfiler
         
-        profile_fn = os.path.join(profiles_dir, '{}{}_{}{}{}{}{}.npy'.format(args.observable, '_mock{}'.format(imock) if imock is not None else '', args.theory_name, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else ''))
+        profile_fn = os.path.join(profiles_dir, '{}_{}{}_{}cov{}{}{}{}{}.npy'.format(args.observable, '_mock{}'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_fixedsn' if args.fixed_sn else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
         
-        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, theory_name=args.theory_name, template_name=template_name, covtype=args.covtype, save_emulator=True, emulator_fn=emulator_fn, footprint_fn=footprint_fn, solve=True, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors)
+        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, covtype=args.covtype, emulator_fn=emulator_fn, footprint_fn=footprint_fn, solve=True, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, sculpt_window=args.sculpt_window, fixed_sn=args.fixed_sn, systematic_priors=args.systematic_priors)
         profiler = MinuitProfiler(likelihood, seed=43, save_fn=profile_fn)
-        profiler.maximize(niterations=1)
+        profiler.maximize(niterations=3)
              
     if 'sampling' in args.todo:
         from desilike.samplers import EmceeSampler
 
-        chain_fn = os.path.join(chains_dir, '{}_{}{}{}{}{}_*.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{:.0f}'.format(args.systematic_priors) if args.systematic_priors is not None else ''))
+        chain_fn = os.path.join(chains_dir, 'standardpriorbasis', '{}_{}{}_{}cov{}{}{}{}_*.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
 
-        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, theory_name=args.theory_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
+        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
         sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=43, save_fn=chain_fn)
         sampler.run(check={'max_eigen_gr': 0.02})
                     
@@ -458,13 +482,13 @@ if __name__ == '__main__':
         from desilike.samplers import ImportanceSampler
         from desilike.samples import Chain
         
-        chain_fn = os.path.join(chains_dir, '{}_{}{}{}{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{:.0f}'.format(args.systematic_priors) if args.systematic_priors is not None else ''))
+        chain_fn = os.path.join(chains_dir, 'standardpriorbasis', '{}_{}_{}cov{}{}{}{}_{{:d}}.npy'.format(args.observable, args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
 
-        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, theory_name=args.theory_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
+        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
         chain = Chain.concatenate([Chain.load(chain_fn.format(i)).remove_burnin(0.5)[::10] for i in range(8)])
         chain.aweight[...] *= np.exp(chain.logposterior.max() - chain.logposterior)
 
-        chain_fn = os.path.join(chains_dir, '{}_importance_{}{}{}{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{:.0f}'.format(args.systematic_priors) if args.systematic_priors is not None else ''))
+        chain_fn = os.path.join(chains_dir, 'standardpriorbasis', '{}_importance_{}{}_{}cov{}{}{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
 
         sampler = ImportanceSampler(likelihood, chain, save_fn=chain_fn)
         sampler.run()
