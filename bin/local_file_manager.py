@@ -15,7 +15,7 @@ class LocalFileName():
         Generation of Abacus simulation, either 'first', 'second', or 'cubic'.
         
     ftype : str, default='power'
-        File type, e.g. 'pkpoles', 'power', 'window' etc. Note: 'pkpoles' files are instances of pypower.PowerSpectrumStatistics whereas 'power' files are pypower.CatalogFFTPower. If ftype includes 'sculpt' (e.g. 'wmatrix_smooth_sculpt'), take corresponding file with Pat's window transformation.
+        File type, e.g. 'pkpoles', 'power', 'window' etc. Note: 'pkpoles' files are instances of pypower.PowerSpectrumStatistics whereas 'power' files are pypower.CatalogFFTPower. If ftype includes 'rotat' (e.g. 'wmatrix_smooth_rotated'), take corresponding file with window transformation.
         
     realization : int, default=None
         Index of the realization (e.g. mock index). If None, merged realizations.
@@ -34,7 +34,7 @@ class LocalFileName():
         
     **kargs: other keyword arguments.
     """
-    _defaults = dict(fdir='', mockgen='second', ftype="power", realization=0, tracer="ELG", completeness=True, region="GCcomb", zrange=None, z=None, weighting=None, nran=None, los=None, cellsize=None, nmesh=None, boxsize=None, rpcut=0., thetacut=0., directedges=True, sculpt_attrs=None)
+    _defaults = dict(fdir='', mockgen='second', version=None, ftype="power", realization=0, tracer="ELG", completeness=True, region="GCcomb", zrange=None, z=None, weighting=None, nran=None, los=None, cellsize=None, nmesh=None, boxsize=None, rpcut=0., thetacut=0., directedges=True, directmax=5000, rotation_attrs=None)
 
     def __init__(self, *args, **kwargs):
         if len(args):
@@ -84,7 +84,7 @@ class LocalFileName():
                 self.fdir = os.path.join(self.fdir, 'pk')
 
         if isinstance(self.completeness, str):
-            comp = self.completeness
+            comp = '_'+self.completeness
         else:
             if 'first' in self.mockgen:
                 comp = '_complete' if self.completeness else ''
@@ -100,17 +100,17 @@ class LocalFileName():
             else:
                 z = ''
         if bool(cut) & self.directedges:
-            direct = '_directedges_max5000'
+            direct = '_directedges_max{}'.format(int(self.directmax))
         else:
             direct = ''
             
         # when sculpting window (chnage of basis through Pat's transformation)
-        if self.sculpt_attrs is not None:
-            sculpt_attrs = '_ells{}_kobsmax{:.1f}_ktmax{:.1f}_capsig{}_difflfac{}_{}cov'.format(''.join([str(i) for i in self.sculpt_attrs['ells']]), self.sculpt_attrs['kobsmax'], self.sculpt_attrs['ktmax'], self.sculpt_attrs['capsig'], self.sculpt_attrs['difflfac'], self.sculpt_attrs['covtype'])
+        if self.rotation_attrs is not None:
+            rotation_attrs = '_ells{}_kobsmax{:.1f}_ktmax{:.1f}_maxsigW{}_maxsigR{}_factordiffell{}_{}cov{}'.format(''.join([str(i) for i in self.rotation_attrs['ells']]), self.rotation_attrs['kobsmax'], self.rotation_attrs['ktmax'], self.rotation_attrs['max_sigma_W'], self.rotation_attrs['max_sigma_R'], self.rotation_attrs['factor_diff_ell'], self.rotation_attrs['covtype'], '_csub' if self.rotation_attrs['csub'] else '')
         else:
-            sculpt_attrs = ''
+            rotation_attrs = ''
 
-        fname = '{}{}_{}{}{}{}{}{}{}{}{}{}{}{}{}.npy'.format(self.ftype, opt_attr('mock', self.realization), self.tracer, comp, opt_attr('', self.region), z, self.weighting if self.weighting is not None else '', opt_attr('nran', self.nran), opt_attr('los', self.los), opt_attr('cellsize', self.cellsize), opt_attr('nmesh', self.nmesh), opt_attr('boxsize', self.boxsize), cut, direct, sculpt_attrs)
+        fname = '{}{}_{}{}{}{}{}{}{}{}{}{}{}{}{}.npy'.format(self.ftype, opt_attr('mock', self.realization), self.tracer, comp, opt_attr('', self.region), z, ('_'+self.weighting) if self.weighting is not None else '', opt_attr('nran', self.nran), opt_attr('los', self.los), opt_attr('cellsize', self.cellsize), opt_attr('nmesh', self.nmesh), opt_attr('boxsize', self.boxsize), cut, direct, rotation_attrs)
             
         return os.path.join(self.fdir, fname)
         
@@ -121,11 +121,11 @@ class LocalFileName():
             if self.tracer[:3]=='ELG':
                 if 'corr' in self.ftype:
                     default_options = dict(tracer='ELG',
-                                           zrange=(0.8, 1.6))
+                                           zrange=(0.8, 1.6) if self.zrange is None else self.zrange)
                     subdir = 'xi'
                 else:
                     default_options = dict(tracer='ELG',
-                                           zrange=(0.8, 1.6),
+                                           zrange=(0.8, 1.6) if self.zrange is None else self.zrange,
                                            directedges=False) 
                     subdir = 'pk'
             ## need to add LRG, QSO, BGS
@@ -138,13 +138,11 @@ class LocalFileName():
             if self.tracer[:3]=='ELG':
                 if 'corr' in self.ftype:
                     default_options = dict(tracer='ELG_LOP',
-                                           zrange=(0.8, 1.6))
+                                           zrange=(0.8, 1.6) if self.zrange is None else self.zrange)
                     subdir = 'xi'
                 else:
                     default_options = dict(tracer='ELG_LOP',
-                                           zrange=(0.8, 1.6),
-                                           cellsize=4,
-                                           directedges=True)
+                                           zrange=(0.8, 1.6) if self.zrange is None else self.zrange)
                     subdir = 'pk'
             elif self.tracer[:3]=='LRG':
                 default_options = dict(tracer='LRG',
@@ -154,10 +152,10 @@ class LocalFileName():
             else:
                 raise ValueError('Unknown tracer: {}'.format(tracer))
             
-            if 'sculpt' in self.ftype:
-                default_options['sculpt_attrs'] = {'ells': [0, 2, 4], 'kobsmax': 0.4, 'ktmax': 0.5, 'capsig': 5, 'difflfac': 10, 'covtype': 'analytic'}
+            if 'rotat' in self.ftype:
+                default_options['rotation_attrs'] = {'ells': [0, 2, 4], 'kobsmax': 0.4, 'ktmax': 0.5, 'max_sigma_W': 5, 'max_sigma_R': 5, 'factor_diff_ell': 10, 'covtype': 'analytic', 'csub': True}
  
-            default_options['fdir'] = os.path.join('/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1', subdir)
+            default_options['fdir'] = os.path.join('/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1', self.version if self.version is not None else '', subdir)
         
         if self.mockgen == 'cubic':
             if self.tracer[:3]=='ELG':
