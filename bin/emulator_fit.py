@@ -267,12 +267,13 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             else:
                 cov = sculptwm.covnew
             cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*xlim[0]))
+            
+            ells = (0, 2, 4)
             nmocks = 1000
             nk = len(np.arange(*xlim[0]))
             hartlap = (nmocks - nk*len(ells) - 2) / (nmocks - 1)
             cov /= hartlap
 
-            ells = (0, 2, 4)
             power = load_poles_list([data_fn.get_path(realization=i).format(i) for i in range(25)], xlim={ell: (0, 0.4, 0.005) for ell in ells})
             data = np.matmul(mmatrix, power['data'].flatten())
             mask = (np.arange(0, 0.4, 0.005) >= xlim[0][0]) & (np.arange(0, 0.4, 0.005) < xlim[0][1])
