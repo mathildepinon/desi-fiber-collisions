@@ -84,7 +84,7 @@ def get_theory(theory_name='velocileptors', observable_name='power', b1E=1.9, te
         #kwargs.update(mu=3)  # using 3 mu points in [0, 1] to reproduce FOLPS, by default it is 6
     elif 'velo' in theory_name:
         Theory = LPTVelocileptorsTracerPowerSpectrumMultipoles if observable_name == 'power' else LPTVelocileptorsTracerCorrelationFunctionMultipoles
-        kwargs.update(prior_basis='standard', use_Pzel=True)
+        kwargs.update(prior_basis='physical')#, use_Pzel=True) # if prior_basis='standard'
     elif 'lptm' in theory_name:
         Theory = LPTMomentsVelocileptorsTracerPowerSpectrumMultipoles if observable_name == 'power' else LPTMomentsVelocileptorsTracerCorrelationFunctionMultipoles
     elif 'eptm' in theory_name:
@@ -107,7 +107,14 @@ def get_theory(theory_name='velocileptors', observable_name='power', b1E=1.9, te
     # Changes to theory.init.params will remain whatever pipeline is built
     b1 = float(euler) + b1E - 1.
     theory.init.params['b1'].update(value=b1, ref={'limits': [b1 - 0.1, b1 + 0.1]})
+    # recover old priors corresponding to freedom='max' with prior_basis='standard', freedom=None
+    #for param in theory.init.params.select(basename=['b1', 'b2', 'bs', 'b3']):
+    #    param.update(fixed=False)
+    #for param in theory.init.params.select(basename=['b2', 'bs', 'b3']):
+    #    param.update(prior=dict(limits=[-15., 15.]))
     #for param in theory.init.params.select(basename=['alpha6']): param.update(fixed=True)
+    for param in theory.init.params.select(basename=['alpha*', 'sn*']):
+        param.update(prior=dict(dist='norm', loc=0., scale=10.))
     if 4 not in ells:
         for param in theory.init.params.select(basename=['alpha4', 'sn4*', 'c4', 'cr2']): param.update(fixed=True)
     #if observable_name != 'power':
@@ -224,7 +231,7 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             elif 'ezmocks' in covtype:
                 print('EZmocks covariance.')
                 cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}{}.npy'.format(tracer[:7], region, zrange[0], zrange[1], xlim[0][0], xlim[0][1], '_thetacut{:.2f}'.format(thetacut) if thetacut and (covtype=='ezmocks') else '')
-                if not os.path.isfile(cov_fn):
+                if True:#not os.path.isfile(cov_fn):
                     cov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=xlim[0], rpcut=rpcut, thetacut=thetacut if (covtype=='ezmocks') else 0, return_x=False)
                     np.save(cov_fn, cov)
                 else:
@@ -249,8 +256,8 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             mo = sculptwm.mo
             if 'ezmocks' in covtype:
                 cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}{}.npy'.format(tracer[:7], region, zrange[0], zrange[1], 0., 0.4, '_thetacut{}'.format(thetacut) if thetacut and (covtype=='ezmocks') else '')
-                if not os.path.isfile(cov_fn):
-                    ezcov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=(0., 0.4, 0.005), rpcut=rpcut, thetacut=thetacut, return_x=False)
+                if True:#not os.path.isfile(cov_fn):
+                    ezcov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=(0., 0.4, 0.005), rpcut=rpcut, thetacut=thetacut, return_x=False, hartlap=False)
                     np.save(cov_fn, ezcov)
                 else:
                     ezcov = np.load(cov_fn)
@@ -258,6 +265,10 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             else:
                 cov = sculptwm.covnew
             cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*xlim[0]))
+            nmocks = 1000
+            nk = len(np.arange(*xlim[0]))
+            hartlap = (nmocks - nk*len(ells) - 2) / (nmocks - 1)
+            cov /= hartlap
 
             ells = (0, 2, 4)
             power = load_poles_list([data_fn.get_path(realization=i).format(i) for i in range(25)], xlim={ell: (0, 0.4, 0.005) for ell in ells})
@@ -384,7 +395,8 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
     
     fixed_params = []
     if solve and not save_emulator:
-        for param in likelihood.all_params.select(basename=['alpha*', 'sn*', 'c*', 'al*']): param.update(derived='.best') # NB: derived='.auto' could shift posterior
+        #for param in likelihood.all_params.select(basename=['alpha*', 'sn*', 'c*', 'al*']): param.update(derived='.best') # NB: derived='.auto' could shift posterior
+        for param in likelihood.all_params.select(basename=['alpha*', 'sn*', 'c*', 'al*']): param.update(derived='.auto')
         theory.log_info('Use analytic marginalization for {}.'.format(theory.params.names(solved=True)))
         fixed_params.append('alpha6')
     if fixed_sn:
@@ -472,7 +484,7 @@ if __name__ == '__main__':
     if 'sampling' in args.todo:
         from desilike.samplers import EmceeSampler
 
-        chain_fn = os.path.join(chains_dir, 'standardpriorbasis', '{}_{}{}_{}cov{}{}{}{}_*.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
+        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}_*.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
 
         likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
         sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=43, save_fn=chain_fn)
@@ -482,13 +494,13 @@ if __name__ == '__main__':
         from desilike.samplers import ImportanceSampler
         from desilike.samples import Chain
         
-        chain_fn = os.path.join(chains_dir, 'standardpriorbasis', '{}_{}_{}cov{}{}{}{}_{{:d}}.npy'.format(args.observable, args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
+        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}_{}cov{}{}{}{}_{{:d}}.npy'.format(args.observable, args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
 
         likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
         chain = Chain.concatenate([Chain.load(chain_fn.format(i)).remove_burnin(0.5)[::10] for i in range(8)])
         chain.aweight[...] *= np.exp(chain.logposterior.max() - chain.logposterior)
 
-        chain_fn = os.path.join(chains_dir, 'standardpriorbasis', '{}_importance_{}{}_{}cov{}{}{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
+        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_importance_{}{}_{}cov{}{}{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
 
         sampler = ImportanceSampler(likelihood, chain, save_fn=chain_fn)
         sampler.run()
