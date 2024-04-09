@@ -240,20 +240,22 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
 
         # when sculpting window with rp/theta-cut
         if sculpt_window:
-            from sculpt_window import SculptWindow
+            from window import WindowRotation
 
-            sculpt_dir = os.path.join("/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/sculpt_window".format(version))
-            sculptwm_fn = LocalFileName().set_default_config(ftype='rotated_all', tracer=tracer, region=region, completeness=completeness, realization=None, weighting=None, rpcut=rpcut, thetacut=thetacut, zrange=zrange)
-            sculptwm_fn.update(fdir=sculpt_dir, cellsize=None, boxsize=None, directedges=False)
-            print('rotated window path:', sculptwm_fn.get_path())
-            sculptwm = SculptWindow.load(sculptwm_fn.get_path())
+            rotation_dir = os.path.join("/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/rotated_window".format(version))
+            rotatedwm_fn = LocalFileName().set_default_config(ftype='rotated_all', tracer=tracer, region=region, completeness=completeness, realization=None, weighting=None, rpcut=rpcut, thetacut=thetacut, zrange=zrange)
+            rotatedwm_fn.rotation_attrs['csub'] = False
+            rotatedwm_fn.update(fdir=rotation_dir, cellsize=None, boxsize=None, directedges=False)
+            print('rotated window path:', rotatedwm_fn.get_path())
+            rotatedwm = WindowRotation.load(rotatedwm_fn.get_path())
 
-            wmatrix = sculptwm.wmatrixnew
+            wmatrix = rotatedwm.wmatrix
+            wmatrix.value = rotatedwm.rotate()[0].T
             wmatrix.select_x(xinlim=xinlim)
             wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // xinrebin * xinrebin, xinrebin))
 
-            mmatrix = sculptwm.mmatrix
-            mo = sculptwm.mo
+            mmatrix = rotatedwm.mmatrix[0]
+            mo = rotatedwm.mmatrix[1]
             if 'ezmocks' in covtype:
                 cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}{}.npy'.format(tracer[:7], region, zrange[0], zrange[1], 0., 0.4, '_thetacut{}'.format(thetacut) if thetacut and (covtype=='ezmocks') else '')
                 if True:#not os.path.isfile(cov_fn):
