@@ -52,7 +52,7 @@ class WindowRotation(BaseClass):
     def set_covmatrix(self, covmatrix, **kwargs):
         self.covmatrix = np.array(covmatrix)
 
-    def fit(self, Minit='momt', Mtarg=None, max_sigma=1000, factor_diff_ell=100, state=None):
+    def fit(self, Minit='momt', Mtarg=None, max_sigma_W=1000, max_sigma_R=1000, factor_diff_ell=100, csub=False, state=None):
         """Fit."""
         import jax
         import optax
@@ -65,6 +65,8 @@ class WindowRotation(BaseClass):
         if Mtarg is None:
             Mtarg = np.eye(len(kout))
 
+        self.csub = csub
+        
         if Minit in [None, 'momt']:
             with_momt = Minit == 'momt'
             Minit = jnp.identity(len(kout), dtype=jnp.float32)#np.eye(len(kout))
@@ -85,19 +87,20 @@ class WindowRotation(BaseClass):
                     mo.append([row[ellsin == ell][-1] / rowin[ellsin == ell][-1] for row, ell in zip(self.wmatrix, ellsout)] * mask_ellout)
                     m.append(0.)
                 #print('mt', np.sum(mt), 'mo', np.sum(mo))
-                Minit = (Minit, mo, mt, m)
-                #Minit = (Minit, mo, mt)
+                if csub:
+                    Minit = (Minit, mo, mt, m)
+                else:
+                    Minit = (Minit, mo, mt)
         else:
             with_momt = isinstance(Minit, tuple)
-        print(Minit)
 
         weights_wmatrix = np.empty_like(self.wmatrix)
         for io, ko in enumerate(kout):
-            weights_wmatrix[io, :] = np.minimum(((kin - ko) / self.bandwidth)**2, max_sigma**2)
+            weights_wmatrix[io, :] = np.minimum(((kin - ko) / self.bandwidth)**2, max_sigma_W**2)
             weights_wmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsin)  # off-diagonal blocks
         weights_covmatrix = np.empty_like(self.covmatrix)
         for io, ko in enumerate(kout):
-            weights_covmatrix[io, :] = np.minimum(((kout - ko) / self.bandwidth)**2, max_sigma**2)
+            weights_covmatrix[io, :] = np.minimum(((kout - ko) / self.bandwidth)**2, max_sigma_R**2)
             weights_covmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsout)  # off-diagonal blocks
         #weights_wmatrix = jax.device_put(weights_wmatrix)
         #weights_covmatrix = jax.device_put(weights_covmatrix)
@@ -170,17 +173,21 @@ class WindowRotation(BaseClass):
         """Return prior and precmatrix if input theory."""
         if mmatrix is None: mmatrix = self.mmatrix
         with_momt = isinstance(mmatrix, tuple)
-        if with_momt:
-            mmatrix, mo, mt, m = mmatrix
-            #mmatrix, mo, mt = mmatrix
+        if with_momt:      
             Wsub = jnp.zeros(self.wmatrix.shape)
-            #Csub = 0
-            Csub = jnp.zeros(self.covmatrix.shape)
-            for mmo, mmt, mm, mask_ellout in zip(mo, mt, m, self.mask_ellsout.values()):
-            #for mmo, mmt, mask_ellout in zip(mo, mt, self.mask_ellsout.values()):
-                mask_mo = mask_ellout * mmo
-                Wsub += jnp.outer(mask_mo, mmt)
-                Csub += mm * jnp.outer(mask_mo, mask_mo)
+            if self.csub:
+                mmatrix, mo, mt, m = mmatrix
+                Csub = jnp.zeros(self.covmatrix.shape)
+                for mmo, mmt, mm, mask_ellout in zip(mo, mt, m, self.mask_ellsout.values()):
+                    mask_mo = mask_ellout * mmo
+                    Wsub += jnp.outer(mask_mo, mmt)
+                    Csub += mm * jnp.outer(mask_mo, mask_mo)
+            else:
+                mmatrix, mo, mt = mmatrix
+                Csub = 0
+                for mmo, mmt, mask_ellout in zip(mo, mt, self.mask_ellsout.values()):
+                    mask_mo = mask_ellout * mmo
+                    Wsub += jnp.outer(mask_mo, mmt)
         else:
             Wsub = Csub = 0.
         #print('WC', Wsub.sum(), Csub.sum())
@@ -253,8 +260,11 @@ class WindowRotation(BaseClass):
         ax.plot(self.kout[0], compactness(self.wmatrix, ells=ells, frac=frac), color='C0', label=r'$W^{\mathrm{cut}}$')
         ax.plot(self.kout[0], compactness(wmatrix_rotated, ells=ells, frac=frac), color='C1', label=r'$W^{\mathrm{cut}\prime}$')
 
-        for kk in (klim or []): ax.axvline(kk, ls=':', color='k')
+        for kk in (klim or []): ax.axvline(kk, ls='--', color='k', alpha=0.5)
 
+        ax.set_xlim(xmin=0, xmax=0.4)
+        ax.set_ylim(ymin=0)
+        ax.plot([0, 0.4], [0, 0.4], ls='-', color='k', alpha=0.5)
         ax.set_xlabel(r'$k_{\mathrm{o}}$ [$h/\mathrm{Mpc}$]')
         ax.set_ylabel(r'$k_{\mathrm{t}}$ [$h/\mathrm{Mpc}$]')
         ax.legend()
@@ -275,7 +285,7 @@ class WindowRotation(BaseClass):
             ax.plot(self.kout[ell], self.kout[ell] * obs_rotated[self.mask_ellsout[ell]], color='C1', label=r'$P^{\prime}(k)$')
             ax.set_title(r'$\ell = {}$'.format(ell))
             ax.set_xlabel(r'$k$ [$h/\mathrm{Mpc}$]')
-            #ax.set_xlim(klim)
+            ax.set_xlim(klim)
 
         lax[0].set_ylabel(r'$k P_{\ell}(k)$ [$(\mathrm{Mpc}/h)^{2}$]')
         lax[0].legend()
@@ -320,7 +330,7 @@ class WindowRotation(BaseClass):
             utils.savefig(fn, fig=fig, dpi=300)
 
     def __getstate__(self):
-        return {name: getattr(self, name) for name in ['kin', 'kout', 'mask_ellsin', 'mask_ellsout', 'khalfout', 'wmatrix', 'covmatrix', 'mmatrix', 'state'] if hasattr(self, name)}
+        return {name: getattr(self, name) for name in ['kin', 'kout', 'mask_ellsin', 'mask_ellsout', 'khalfout', 'wmatrix', 'covmatrix', 'mmatrix', 'state', 'csub'] if hasattr(self, name)}
 
     
 def get_data(source='desi', catalog='second', version='v3', tracer='ELG', region='NGC', completeness=True, rpcut=0, thetacut=0, zrange=None, kolim=(0.02, 0.2), korebin=10, ktmax=0.5, ktrebin=10, nran=None, cellsize=None, boxsize=None, covtype='analytic'):
@@ -394,15 +404,17 @@ if __name__ == '__main__':
 
     thetacut = 0.05
     
-    max_sigma = 5
+    max_sigma_W = 5
+    max_sigma_R = 5
     factor_diff_ell = 10
+    csub = False
     covtype = 'analytic'
     
     data = get_data(source=source, catalog=catalog, version=version, tracer=tracer, region=region, zrange=zrange, completeness=completeness, thetacut=thetacut, kolim=kolim, korebin=korebin, ktmax=ktmax, ktrebin=ktrebin, covtype=covtype)
     
     window_rotation = WindowRotation(wmatrix=data['wmatrix'], covmatrix=data['covariance'])
     
-    mmatrix, state = window_rotation.fit(Minit='momt' if thetacut else None, max_sigma=max_sigma, factor_diff_ell=factor_diff_ell)
+    mmatrix, state = window_rotation.fit(Minit='momt' if thetacut else None, max_sigma_W=max_sigma_W, max_sigma_R=max_sigma_R, factor_diff_ell=factor_diff_ell, csub=csub)
     
     output_dir = "/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/rotated_window".format(version)        
     output_fn = LocalFileName().set_default_config(ftype='rotated_all', tracer=tracer, region=region, 
@@ -413,11 +425,11 @@ if __name__ == '__main__':
     output_fn.rotation_attrs['ells'] = ells
     output_fn.rotation_attrs['kobsmax'] = kolim[-1]
     output_fn.rotation_attrs['ktmax'] = ktmax
-    output_fn.rotation_attrs['max_sigma_W'] = max_sigma
-    output_fn.rotation_attrs['max_sigma_R'] = max_sigma
+    output_fn.rotation_attrs['max_sigma_W'] = max_sigma_W
+    output_fn.rotation_attrs['max_sigma_R'] = max_sigma_R
     output_fn.rotation_attrs['factor_diff_ell'] = factor_diff_ell
     output_fn.rotation_attrs['covtype'] = covtype
-    output_fn.rotation_attrs['csub'] = True
+    output_fn.rotation_attrs['csub'] = csub
 
     window_rotation.save(output_fn.get_path())        
         
