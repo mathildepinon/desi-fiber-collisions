@@ -67,11 +67,11 @@ class WindowRotation(BaseClass):
 
         if Minit in [None, 'momt']:
             with_momt = Minit == 'momt'
-            Minit = np.eye(len(kout))
-            offsets = np.zeros_like(Minit)
+            Minit = jnp.identity(len(kout), dtype=jnp.float32)#np.eye(len(kout))
+            offsets = jnp.zeros((len(kout), len(kout)), dtype=jnp.float32)#np.zeros_like(Minit)
             max_offset = 0
             for k in range(1, 1 + max_offset):
-                offsets += np.eye(len(kout), k=k) + np.eye(len(kout), k=-k)
+                offsets += jnp.identity(len(kout), k=k, dtype=jnp.float32) + jnp.identity(len(kout), k=-k, dtype=jnp.float32)#np.eye(len(kout), k=k) + np.eye(len(kout), k=-k)
             offsets *= ellsout[:, None] * ellsout[...]
             offsets /= np.maximum(np.sum(offsets, axis=1), 1)[:, None]
             Minit -= offsets
@@ -89,6 +89,7 @@ class WindowRotation(BaseClass):
                 #Minit = (Minit, mo, mt)
         else:
             with_momt = isinstance(Minit, tuple)
+        print(Minit)
 
         weights_wmatrix = np.empty_like(self.wmatrix)
         for io, ko in enumerate(kout):
@@ -119,7 +120,7 @@ class WindowRotation(BaseClass):
             #print(loss_W, loss_C, weights_wmatrix.sum(), weights_covmatrix.sum(), weights_wmatrix.shape, weights_covmatrix.shape)
             return loss_W + loss_C + loss_M
 
-        def fit(theta, loss, init_learning_rate=0.00001, meta_learning_rate=0.0001, nsteps=100, state=None, meta_state=None):
+        def fit(theta, loss, init_learning_rate=0.00001, meta_learning_rate=0.0001, nsteps=100000, state=None, meta_state=None):
 
             self.log_info(f'Will do {nsteps} steps')
             optimizer = optax.inject_hyperparams(optax.adabelief)(learning_rate=init_learning_rate)
@@ -418,27 +419,5 @@ if __name__ == '__main__':
     output_fn.rotation_attrs['covtype'] = covtype
     output_fn.rotation_attrs['csub'] = True
 
-    np.save(output_dir+'/mmatrix_newscript', mmatrix[0])
-    np.save(output_dir+'/mmatrix1_newsscript', mmatrix[1])
-    np.save(output_dir+'/mmatrix2_newsscript', mmatrix[2])
-    np.save(output_dir+'/mmatrix3_newsscript', mmatrix[3])
-    window_rotation.save(output_fn.get_path())
-    
-    ## old script
-    print('testing old script')
-    
-    import anotherpipe.powerestimation.rotatewindow as rw
-    import anotherpipe.powerestimation.powerestimate as pe
-    
-    data_processed = pe.make(data['power'], data['wmatrix'], data['covariance'])
-
-    # Fit
-    mmatrix, state = rw.fit(data_processed, ls=ells, momt=True, csub=True, capsigW=5, difflfac=10, capsigR=5)
-
-    np.save(output_dir+'/mmatrix_oldscript', mmatrix[0])
-    np.save(output_dir+'/mmatrix1_oldscript', mmatrix[1])
-    np.save(output_dir+'/mmatrix2_oldscript', mmatrix[2])
-    np.save(output_dir+'/mmatrix3_oldscript', mmatrix[3])
-        
-        
+    window_rotation.save(output_fn.get_path())        
         
