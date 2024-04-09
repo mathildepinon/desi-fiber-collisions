@@ -27,14 +27,14 @@ class WindowRotation(BaseClass):
     def set_wmatrix(self, wmatrix, **kwargs):
         self.kin = {proj.ell: x for proj, x in zip(wmatrix.projsin, wmatrix.xin)}
         self.kout = {proj.ell: x for proj, x in zip(wmatrix.projsout, wmatrix.xout)}
-        self.wmatrix = np.array(wmatrix.value.T, dtype='f8')
+        self.wmatrix = wmatrix #np.array(wmatrix.value.T, dtype='f8')
 
         ellsin = np.concatenate([[ell] * len(x) for ell, x in self.kin.items()])
         self.mask_ellsin = {ell: ellsin == ell for ell in self.kin}
         ellsout = np.concatenate([[ell] * len(x) for ell, x in self.kout.items()])
         self.mask_ellsout = {ell: ellsout == ell for ell in self.kout}
 
-        wm00 = self.wmatrix[np.ix_(self.mask_ellsout[0], self.mask_ellsin[0])][np.argmin(np.abs(self.kout[0] - 0.1))]  # kout = 0.1 h/Mpc
+        wm00 = self.wmatrix.value.T[np.ix_(self.mask_ellsout[0], self.mask_ellsin[0])][np.argmin(np.abs(self.kout[0] - 0.1))]  # kout = 0.1 h/Mpc
         height = np.max(wm00)  # peak height
         kmax = self.kin[0][np.argmin(np.abs(wm00 - height))]  # k at maximum
         mask_before = self.kin[0] < kmax
@@ -45,7 +45,7 @@ class WindowRotation(BaseClass):
         self.khalfout = {}
         for ell in self.kout:
             kin = self.kin[ell]
-            wm = self.wmatrix[np.ix_(self.mask_ellsout[ell], self.mask_ellsin[ell])]
+            wm = self.wmatrix.value.T[np.ix_(self.mask_ellsout[ell], self.mask_ellsin[ell])]
             mask_half = (wm / kin) / np.max(wm / kin, axis=1)[:, None] > 0.5
             self.khalfout[ell] = np.sum(wm * mask_half * self.kin[ell], axis=1) / np.sum(wm * mask_half, axis=1)
 
@@ -82,9 +82,9 @@ class WindowRotation(BaseClass):
                 kincut = 0.20
                 idxout = 20
                 for mask_ellout in self.mask_ellsout.values():
-                    rowin = self.wmatrix[mask_ellout, :][idxout, :]
+                    rowin = self.wmatrix.value.T[mask_ellout, :][idxout, :]
                     mt.append(rowin * (kin >= kincut))
-                    mo.append([row[ellsin == ell][-1] / rowin[ellsin == ell][-1] for row, ell in zip(self.wmatrix, ellsout)] * mask_ellout)
+                    mo.append([row[ellsin == ell][-1] / rowin[ellsin == ell][-1] for row, ell in zip(self.wmatrix.value.T, ellsout)] * mask_ellout)
                     m.append(0.)
                 #print('mt', np.sum(mt), 'mo', np.sum(mo))
                 if csub:
@@ -94,7 +94,7 @@ class WindowRotation(BaseClass):
         else:
             with_momt = isinstance(Minit, tuple)
 
-        weights_wmatrix = np.empty_like(self.wmatrix)
+        weights_wmatrix = np.empty_like(self.wmatrix.value.T)
         for io, ko in enumerate(kout):
             weights_wmatrix[io, :] = np.minimum(((kin - ko) / self.bandwidth)**2, max_sigma_W**2)
             weights_wmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsin)  # off-diagonal blocks
@@ -173,8 +173,10 @@ class WindowRotation(BaseClass):
         """Return prior and precmatrix if input theory."""
         if mmatrix is None: mmatrix = self.mmatrix
         with_momt = isinstance(mmatrix, tuple)
+        if not hasattr(self, 'csub'):
+            self.csub = len(mmatrix)>3
         if with_momt:      
-            Wsub = jnp.zeros(self.wmatrix.shape)
+            Wsub = jnp.zeros(self.wmatrix.value.T.shape)
             if self.csub:
                 mmatrix, mo, mt, m = mmatrix
                 Csub = jnp.zeros(self.covmatrix.shape)
@@ -191,7 +193,7 @@ class WindowRotation(BaseClass):
         else:
             Wsub = Csub = 0.
         #print('WC', Wsub.sum(), Csub.sum())
-        Wp = jnp.matmul(mmatrix, self.wmatrix) - Wsub
+        Wp = jnp.matmul(mmatrix, self.wmatrix.value.T) - Wsub
         Cp = jnp.matmul(jnp.matmul(mmatrix, self.covmatrix), mmatrix.T) - Csub
         if obs is not None:
             obs = np.asarray(obs, dtype='f8').ravel()
@@ -227,7 +229,7 @@ class WindowRotation(BaseClass):
                     norm = self.kin[ellin]
                     if refwmatrix is not None:
                         ax.semilogy(self.kin[ellin], np.abs(refwmatrix[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])][indexout, :] / norm), alpha=alphas[ik], color='C0', ls=':', label=r'$W$' if ik == 0 else '')
-                    ax.semilogy(self.kin[ellin], np.abs(self.wmatrix[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])][indexout, :] / norm), alpha=alphas[ik], color='C0', label=r'$W^{\mathrm{cut}}$' if ik == 0 else '')
+                    ax.semilogy(self.kin[ellin], np.abs(self.wmatrix.value.T[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])][indexout, :] / norm), alpha=alphas[ik], color='C0', label=r'$W^{\mathrm{cut}}$' if ik == 0 else '')
                     ax.semilogy(self.kin[ellin], np.abs(wmatrix_rotated[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])][indexout, :] / norm), alpha=alphas[ik], color='C1', label=r'$W^{\mathrm{cut}\prime}$' if ik == 0 else '')                       
                 #ax.set_title(r'$\ell_{{\mathrm{{t}}}} = {:d} \times \ell_{{\mathrm{{o}}}} = {:d}$'.format(ellin, ellout))
                 text = r'$\ell_{{\mathrm{{t}}}} = {:d} \times \ell_{{\mathrm{{o}}}} = {:d}$'.format(ellin, ellout)
@@ -257,7 +259,7 @@ class WindowRotation(BaseClass):
 
         if refwmatrix is not None:
             ax.plot(self.kout[0], compactness(refwmatrix, ells=ells, frac=frac), color='C0', ls=':', label=r'$W$')
-        ax.plot(self.kout[0], compactness(self.wmatrix, ells=ells, frac=frac), color='C0', label=r'$W^{\mathrm{cut}}$')
+        ax.plot(self.kout[0], compactness(self.wmatrix.value.T, ells=ells, frac=frac), color='C0', label=r'$W^{\mathrm{cut}}$')
         ax.plot(self.kout[0], compactness(wmatrix_rotated, ells=ells, frac=frac), color='C1', label=r'$W^{\mathrm{cut}\prime}$')
 
         for kk in (klim or []): ax.axvline(kk, ls='--', color='k', alpha=0.5)
@@ -330,8 +332,19 @@ class WindowRotation(BaseClass):
             utils.savefig(fn, fig=fig, dpi=300)
 
     def __getstate__(self):
-        return {name: getattr(self, name) for name in ['kin', 'kout', 'mask_ellsin', 'mask_ellsout', 'khalfout', 'wmatrix', 'covmatrix', 'mmatrix', 'state', 'csub'] if hasattr(self, name)}
-
+        state = {}
+        for name in ['kin', 'kout', 'mask_ellsin', 'mask_ellsout', 'khalfout', 'covmatrix', 'mmatrix', 'state', 'csub']:
+            if hasattr(self, name):
+                state[name] = getattr(self, name)
+        for name in ['wmatrix']:
+            state[name] = getattr(self, name).__getstate__()
+        return state
+        #return {name: getattr(self, name) for name in ['kin', 'kout', 'mask_ellsin', 'mask_ellsout', 'khalfout', 'wmatrix', 'covmatrix', 'mmatrix', 'state', 'csub'] if hasattr(self, name)}
+        
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.wmatrix = BaseMatrix.from_state(self.wmatrix)
+      
     
 def get_data(source='desi', catalog='second', version='v3', tracer='ELG', region='NGC', completeness=True, rpcut=0, thetacut=0, zrange=None, kolim=(0.02, 0.2), korebin=10, ktmax=0.5, ktrebin=10, nran=None, cellsize=None, boxsize=None, covtype='analytic'):
 
@@ -391,7 +404,7 @@ if __name__ == '__main__':
     version = 'v4_1'
 
     tracer = "ELG_LOPnotqso"
-    region = "SGC"
+    region = "GCcomb"
     zrange = (1.1, 1.6)
     completeness = 'complete'
     
