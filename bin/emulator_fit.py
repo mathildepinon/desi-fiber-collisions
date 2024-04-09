@@ -371,7 +371,7 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
             else: cutflag = ''
             
             from desilike.samples import Profiles
-            profile_cutsky = Profiles.load(os.path.join(profiles_dir, 'power_velocileptors_{}cov{}_sculptwindow_fixedsn.npy'.format('analytic', cutflag)))
+            profile_cutsky = Profiles.load(os.path.join(profiles_dir, 'power_velocileptors_{}cov{}_sculptwindow_fixedsn.npy'.format(kwargs['covtype'], cutflag)))
             fid_priors = [profile_cutsky.bestfit['syst_{}'.format(i)][0] for i in range(len(ells))]
             for i in range(len(ells)):
                 systematic_templates.init.params['syst_{}'.format(i)].update(prior=dict(dist='norm', loc=fid_priors[i], scale=systematic_priors*fid_priors[i]), derived='.best')    
