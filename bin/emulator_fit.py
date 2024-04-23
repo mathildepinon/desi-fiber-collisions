@@ -251,6 +251,8 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
 
             rotation_dir = os.path.join("/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/rotated_window".format(version))
             rotatedwm_fn = LocalFileName().set_default_config(ftype='rotated_all', tracer=tracer, region=region, completeness=completeness, realization=None, weighting=None, rpcut=rpcut, thetacut=thetacut, zrange=zrange)
+            #rotatedwm_fn.rotation_attrs['covtype'] = covtype 
+            #NB: always using the analytic cov matrix to define the rotation (default)
             rotatedwm_fn.rotation_attrs['csub'] = False
             rotatedwm_fn.update(fdir=rotation_dir, cellsize=None, boxsize=None, directedges=False)
             print('rotated window path:', rotatedwm_fn.get_path())
@@ -261,8 +263,7 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             wmatrix.select_x(xinlim=xinlim)
             wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // xinrebin * xinrebin, xinrebin))
 
-            mmatrix = rotatedwm.mmatrix[0]
-            mo = rotatedwm.mmatrix[1]
+            mmatrix = rotatedwm.mmatrix[0] if isinstance(rotatedwm.mmatrix, tuple) else rotatedwm.mmatrix
             if 'ezmocks' in covtype:
                 cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}{}.npy'.format(tracer[:7], region, zrange[0], zrange[1], 0., 0.4, '_thetacut{}'.format(thetacut) if thetacut and (covtype=='ezmocks') else '')
                 if not os.path.isfile(cov_fn):
@@ -281,7 +282,11 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             mask_flat = np.concatenate((mask, )*len(ells))
             data = data[mask_flat]
             shotnoise = np.mean(np.matmul(mmatrix, np.full_like(power['data'].flatten(), power['shotnoise'])))
-            systematic_templates = SystematicTemplatePowerSpectrumMultipoles(templates=[mo[0][mask_flat], mo[1][mask_flat], mo[2][mask_flat]])
+            if isinstance(rotatedwm.mmatrix, tuple):
+                mo = rotatedwm.mmatrix[1]
+                systematic_templates = None# SystematicTemplatePowerSpectrumMultipoles(templates=[mo[0][mask_flat], mo[1][mask_flat], mo[2][mask_flat]])
+            else:
+                systematic_templates = None
         
     if observable_name == 'corr':
         
@@ -329,7 +334,7 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
     
     if kwargs['catalog']=='cubic':
         xlim = {ell: (0.001, 0.35, 0.005) for ell in [0, 2, 4]}
-     
+        
     data, wmatrix, cov, systematic_templates, shotnoise = get_fit_data(observable_name=observable_name, sculpt_window=sculpt_window, xlim=xlim, **kwargs)
     
     if isinstance(data, (tuple, list)):
@@ -500,7 +505,7 @@ if __name__ == '__main__':
     if 'profiling' in args.todo:
         from desilike.profilers import MinuitProfiler
         
-        profile_fn = os.path.join(profiles_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}{}.npy'.format(args.observable, '_mock{}'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_fixedsn' if args.fixed_sn else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
+        profile_fn = os.path.join(profiles_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}{}.npy'.format(args.observable, '_mock{}'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow_nosyst' if args.sculpt_window else '', '_fixedsn' if args.fixed_sn else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
         
         likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, covtype=args.covtype, emulator_fn=emulator_fn, footprint_fn=footprint_fn, solve=True, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, sculpt_window=args.sculpt_window, fixed_sn=args.fixed_sn, systematic_priors=args.systematic_priors)
         profiler = MinuitProfiler(likelihood, seed=43, save_fn=profile_fn)
