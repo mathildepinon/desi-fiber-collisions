@@ -11,13 +11,18 @@ def load_poles(fn):
         toret = PowerSpectrumMultipoles.load(fn)
     return toret
 
-def load_poles_list(fns, xlim=None, rebin=None):
+def load_poles_list(fns, combine=None, xlim=None, rebin=None):
     list_data, list_shotnoise = [], []
     x, xedges, ells = None, None, None
     
+    icb = 0
     for mock in fns:
         if os.path.exists(mock):
-            poles = load_poles(mock)
+            if combine is not None:
+                poles = load_poles(mock) + load_poles(combine[icb])
+                icb += 1
+            else:
+                poles = load_poles(mock)
         else:
             raise FileNotFoundError('No such file or directory: {}'.format(mock))
         mock_shotnoise = poles.shotnoise
@@ -55,15 +60,20 @@ def load_poles_list(fns, xlim=None, rebin=None):
     
     return toret
 
-def load_corr_list(fns, ells=(0, 2, 4), xlim=None, rebin=None):
+def load_corr_list(fns, combine=None, ells=(0, 2, 4), xlim=None, rebin=None):
     list_data = []
     x, xedges = None, None
     
     from pycorr import TwoPointCorrelationFunction
     
+    icb = 0
     for mock in fns:
         if os.path.exists(mock):
-            poles = TwoPointCorrelationFunction.load(mock)
+            if combine is not None:
+                poles = TwoPointCorrelationFunction.load(mock) + TwoPointCorrelationFunction.load(combine[icb])
+                icb += 1
+            else:
+                poles = TwoPointCorrelationFunction.load(mock)
         else:
             raise FileNotFoundError('No such file or directory: {}'.format(mock))
         

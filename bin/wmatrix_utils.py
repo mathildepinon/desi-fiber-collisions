@@ -8,6 +8,8 @@ def plot_matrix(mat, x1=None, x2=None, xlabel1=None, xlabel2=None, barlabel=None
                 corrcoef=False, figsize=None, norm=None, labelsize=None):
 
     size1, size2 = [row[0].shape[0] for row in mat], [col.shape[1] for col in mat[0]]
+    
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
 
     def _make_list(x, size):
         if not utils.is_sequence(x):
@@ -35,8 +37,6 @@ def plot_matrix(mat, x1=None, x2=None, xlabel1=None, xlabel2=None, barlabel=None
                             figsize=(figsize[0] / xextend, figsize[1]),
                             gridspec_kw={'width_ratios': size1, 'height_ratios': size2[::-1]},
                             squeeze=False)
-    wspace = hspace = 0.18
-    fig.subplots_adjust(wspace=wspace, hspace=hspace)
     for i in range(ncols):
         for j in range(nrows):
             ax = lax[nrows - j - 1][i]
@@ -45,21 +45,20 @@ def plot_matrix(mat, x1=None, x2=None, xlabel1=None, xlabel2=None, barlabel=None
             if x2[j] is None: xx2 = 1 + np.arange(mat[i][j].shape[1])
             mesh = ax.pcolor(xx1, xx2, mat[i][j].T, norm=norm, cmap=plt.get_cmap('RdBu'))
             if i > 0 or x1[i] is None: ax.yaxis.set_visible(False)
-            if j == 0 and xlabel1[i]: ax.set_xlabel(xlabel1[i], fontsize=labelsize)
+            if j == 0 and xlabel1[i]: ax.set_xlabel(xlabel1[i])
             if j > 0 or x2[j] is None: ax.xaxis.set_visible(False)
-            if i == 0 and xlabel2[j]: ax.set_ylabel(xlabel2[j], fontsize=labelsize)
+            if i == 0 and xlabel2[j]: ax.set_ylabel(xlabel2[j])
             ax.tick_params()
             if label1[i] is not None or label2[j] is not None:
                 text = r'{} $\times$ {}'.format(label1[i], label2[j])
-                ax.text(0.05, 0.95, text, horizontalalignment='left', verticalalignment='top',\
-                        transform=ax.transAxes, color='black')
+                ax.text(0.05, 0.95, text, horizontalalignment='left', verticalalignment='top', transform=ax.transAxes, color='black', fontsize=12)
             ax.grid(False)
-
-    fig.subplots_adjust(right=xextend)
-    cbar_ax = fig.add_axes([xextend + 0.2, 0.11, 0.03, 0.86])
-    cbar_ax.tick_params()
+            
+    plt.subplots_adjust(wspace=0.1, hspace=0.1, left=0.15, bottom=0.15, right=0.8)
+    cbar_ax = fig.add_axes([xextend+0.025, 0.15, 0.02, 0.8])
     cbar = fig.colorbar(mesh, cax=cbar_ax)
-    if barlabel: cbar.set_label(barlabel, rotation=90)
+    if barlabel: cbar.set_label(barlabel)
+    fig.align_ylabels()
     return lax
 
 # compute window matrix from window power

@@ -3,7 +3,7 @@ figure.titlesize   : medium     # size of the figure title
 figure.titleweight : normal     # weight of the figure title
 figure.figsize     : 6, 4      # figure size in inches
 figure.dpi         : 100        # figure dots per inch
-figure.autolayout  : True      # When True, automatically adjust subplot # not used because of mollweide plot ...
+figure.autolayout  : True     # When True, automatically adjust subplot # not used because of mollweide plot ...
 figure.frameon     : True
 
 figure.subplot.left    : 0.08  # the left side of the subplots of the figure
