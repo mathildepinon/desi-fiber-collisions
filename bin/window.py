@@ -95,16 +95,22 @@ class WindowRotation(BaseClass):
             with_momt = isinstance(Minit, tuple)
 
         weights_wmatrix = np.empty_like(self.wmatrix.value.T)
+        weights_wmatrix_denom = np.empty_like(self.wmatrix.value.T)
+        eps=np.finfo(float).eps
         for io, ko in enumerate(kout):
-            weights_wmatrix[io, :] = np.minimum(((kin - ko) / self.bandwidth)**2, max_sigma_W**2)
-            weights_wmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsin)  # off-diagonal blocks
+            weights_wmatrix[io, :] = np.minimum(((kin - ko) / self.bandwidth)**2 + factor_diff_ell * (ellsout[io] != ellsin), max_sigma_W**2)
+            #weights_wmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsin)  # off-diagonal blocks
+            weights_wmatrix_denom[io, :] = (weights_wmatrix[io, : ] + eps) / (((kin - ko) / self.bandwidth)**2 + factor_diff_ell * (ellsout[io] != ellsin) + eps)
+        
         weights_covmatrix = np.empty_like(self.covmatrix)
+        weights_covmatrix_denom = np.empty_like(self.covmatrix)
         for io, ko in enumerate(kout):
-            weights_covmatrix[io, :] = np.minimum(((kout - ko) / self.bandwidth)**2, max_sigma_R**2)
-            weights_covmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsout)  # off-diagonal blocks
+            weights_covmatrix[io, :] = np.minimum(((kout - ko) / self.bandwidth)**2 + factor_diff_ell * (ellsout[io] != ellsout), max_sigma_R**2)
+            #weights_covmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsout)  # off-diagonal blocks
+            weights_covmatrix_denom[io, :] = (weights_covmatrix[io, :] + eps) / (((kout - ko) / self.bandwidth)**2 + factor_diff_ell * (ellsout[io] != ellsout) + eps)
         #weights_wmatrix = jax.device_put(weights_wmatrix)
         #weights_covmatrix = jax.device_put(weights_covmatrix)
-
+        
         def softabs(x):
             return jnp.sqrt(x**2 + 1e-37)
         
@@ -116,9 +122,11 @@ class WindowRotation(BaseClass):
         def loss(mmatrix):
             Wp, Cp = self.rotate(mmatrix=mmatrix)
             if with_momt: mmatrix = mmatrix[0]
-            loss_W = jnp.sum(softabs(Wp * weights_wmatrix)) / jnp.sum(softabs(Wp) * (weights_wmatrix > 0))
+            #loss_W = jnp.sum(softabs(Wp * weights_wmatrix)) / jnp.sum(softabs(Wp) * (weights_wmatrix > 0))
+            loss_W = jnp.sum(softabs(Wp * weights_wmatrix)) / jnp.sum(softabs(Wp) * weights_wmatrix_denom)
             Rp = RfromC(Cp)
-            loss_C = jnp.sum(softabs(Rp * weights_covmatrix)) / jnp.sum(softabs(Rp) * (weights_covmatrix > 0))
+            #loss_C = jnp.sum(softabs(Rp * weights_covmatrix)) / jnp.sum(softabs(Rp) * (weights_covmatrix > 0))
+            loss_C = jnp.sum(softabs(Rp * weights_covmatrix)) / jnp.sum(softabs(Rp) * weights_covmatrix_denom)
             loss_M = 10 * jnp.sum((jnp.sum(mmatrix, axis=1) - 1.)**2)
             #print(loss_W, loss_C, weights_wmatrix.sum(), weights_covmatrix.sum(), weights_wmatrix.shape, weights_covmatrix.shape)
             return loss_W + loss_C + loss_M
@@ -174,7 +182,7 @@ class WindowRotation(BaseClass):
         if mmatrix is None: mmatrix = self.mmatrix
         with_momt = isinstance(mmatrix, tuple)
         if not hasattr(self, 'csub'):
-            self.csub = len(mmatrix)>3
+            self.csub = isinstance(mmatrix, tuple) & len(mmatrix)>3
         if with_momt:      
             Wsub = jnp.zeros(self.wmatrix.value.T.shape)
             if self.csub:
@@ -212,11 +220,12 @@ class WindowRotation(BaseClass):
             return Wp, Cp, Pp
         return Wp, Cp
 
-    def plot_wmatrix(self, k=0.1, ells=None, refwmatrix=None, semilogy=True, fn=None):
+    def plot_wmatrix(self, mmatrix=None, k=0.1, ells=None, refwmatrix=None, semilogy=True, fn=None):
+        if mmatrix is None: mmatrix = self.mmatrix
         k = np.ravel(k)
         if ells is None: ells = sorted(self.kout.keys())
 
-        wmatrix_rotated = self.rotate()[0]
+        wmatrix_rotated = self.rotate(mmatrix=mmatrix)[0]
         alphas = np.linspace(1, 0.2, len(k))
         fig, lax = plt.subplots(len(ells), len(ells), sharex=True, sharey=True, figsize=(6, 5))
 
@@ -386,7 +395,7 @@ def get_data(source='desi', catalog='second', version='v3', tracer='ELG', region
     if covtype == 'ezmocks':
         cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}{}.npy'.format(tracer[:7], region, zmin, zmax, kolim[0], kolim[1], '_thetacut{:.2f}'.format(thetacut) if thetacut else '')
         if not os.path.isfile(cov_fn):
-            cov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=(kolim[0], kolim[1], 0.005), rpcut=rpcut, thetacut=thetacut, return_x=False)
+            cov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=(kolim[0], kolim[1], 0.005), rpcut=rpcut, thetacut=thetacut, return_x=False, hartlap=False)
             np.save(cov_fn, cov)
         else:
             print('Loading EZmocks covariance: {}'.format(cov_fn))
@@ -410,12 +419,12 @@ if __name__ == '__main__':
     
     ells = [0, 2, 4]
     
-    kolim = (0., 0.4)
+    kolim = (0.02, 0.2)
     korebin = 5
     ktmax = 0.5
-    ktrebin = 1
+    ktrebin = 10
 
-    thetacut = 0.05
+    thetacut = 0.
     
     max_sigma_W = 5
     max_sigma_R = 5
