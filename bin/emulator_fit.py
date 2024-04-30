@@ -264,20 +264,27 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             print('rotated window path:', rotatedwm_fn.get_path())
             rotatedwm = WindowRotation.load(rotatedwm_fn.get_path())
              
-            mask = (np.arange(0, 0.4, 0.005) >= xlim[0][0]) & (np.arange(0, 0.4, 0.005) < xlim[0][1])
-            mask_flat = np.concatenate((mask, )*len(ells))
+            masko = (np.arange(0, 0.4, 0.005) >= xlim[0][0]) & (np.arange(0, 0.4, 0.005) < xlim[0][1])
+            masko_flat = np.concatenate((masko, )*len(ells))
+            maskt = (rotatedwm.kin[0] >= xinlim[0]) & (rotatedwm.kin[0] < xinlim[1])            
+            maskt_flat = np.concatenate((maskt, )*len(ells))
             
             if isinstance(rotatedwm.mmatrix, tuple):
                 if len(rotatedwm.mmatrix)>3:
                     mmatrix, mo, mt, m = rotatedwm.mmatrix
                 else:
                     mmatrix, mo, mt = rotatedwm.mmatrix
-                mmatrix = mmatrix[np.ix_(mask_flat, mask_flat)]
-                mo = [mo[0][mask_flat], mo[1][mask_flat], mo[2][mask_flat]]
+                mmatrix = mmatrix[np.ix_(masko_flat, masko_flat)]
+                mo = [mo[0][masko_flat], mo[1][masko_flat], mo[2][masko_flat]]
+                mt = [mt[0][maskt_flat], mt[1][maskt_flat], mt[2][maskt_flat]]
                 systematic_templates = SystematicTemplatePowerSpectrumMultipoles(templates=mo)
+                if len(rotatedwm.mmatrix)>3:
+                    mmatrix = (mmatrix, mo, mt, m)
+                else:
+                    mmatrix = (mmatrix, mo, mt)
             else:
                 mmatrix = rotatedwm.mmatrix
-                mmatrix = mmatrix[np.ix_(mask_flat, mask_flat)]
+                mmatrix = mmatrix[np.ix_(masko_flat, masko_flat)]
                 systematic_templates = None
                 
             if not mmatrix_flag:
@@ -285,7 +292,8 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             
             wmatrix = rotatedwm.wmatrix
             wmatrix.select_x(xinlim=xinlim)
-            wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // xinrebin * xinrebin, xinrebin))
+            # wmatrix must be rebinned before the rotation if needed
+            #wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // xinrebin * xinrebin, xinrebin))
             wmatrix.select_x(xoutlim=xlim[0])
  
             if 'ezmocks' in covtype:
@@ -303,15 +311,12 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             power = load_poles_list([data_fn.get_path(realization=i).format(i) for i in range(25)], xlim=xlim)
             data = power['data'].flatten()
             x = power['k']
-            #data = data[mask_flat]
-            #x = [k[mask] for k in power['k']]
             
             # apply rotation
             rotatedwm.set_wmatrix(wmatrix)
             rotatedwm.set_covmatrix(cov)
-            wm, cov = rotatedwm.rotate(mmatrix=mmatrix)
+            wm, cov, data = rotatedwm.rotate(mmatrix=mmatrix, obs=data)
             wmatrix.value = wm.T
-            data = np.matmul(mmatrix, data)
             shotnoise = np.zeros_like(power['data'])
             shotnoise[0] = power['shotnoise']
             #print(np.matmul(mmatrix, shotnoise.flatten()))
@@ -561,8 +566,8 @@ if __name__ == '__main__':
         chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}_*.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_centeredpriors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
 
         likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
-        sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=43, save_fn=chain_fn)
-        sampler.run(check={'max_eigen_gr': 0.03})
+        sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=42, save_fn=chain_fn)
+        sampler.run(check={'max_eigen_gr': 0.02})
                     
     if 'importance' in args.todo:
         from desilike.samplers import ImportanceSampler

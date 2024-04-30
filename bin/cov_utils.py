@@ -48,7 +48,7 @@ def read_xi_cov(tracer="LRG", region="GCcomb", version="0.6", zmin=0.4, zmax=0.6
 #    cov = np.cov(poles_list_nonan, rowvar=False, ddof=1)
 #    return cov
 
-def get_EZmocks_covariance(stat, tracer, zrange=None, region='GCcomb', completeness=True, ells=[0, 2, 4], select=None, rpcut=0., thetacut=0., return_x=False, hartlap=True):
+def get_EZmocks_covariance(stat, tracer, zrange=None, region='GCcomb', completeness=True, ells=[0, 2, 4], select=None, rpcut=0., thetacut=0., return_x=False, hartlap=False):
     from desi_file_manager import DESIFileName
 
     if 'pk' in stat:
