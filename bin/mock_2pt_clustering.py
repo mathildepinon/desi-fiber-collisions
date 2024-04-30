@@ -224,9 +224,6 @@ def main():
         zmax = zrange[tracer[:3]][1]
     
     data, randoms = select_data(mockgen=mockgen, version=version, catalog=sample, imock=imock, nrandoms=nrandoms, tracer=tracer, region=region, completeness=completeness, zrange=(zmin, zmax))
-    #print('data : {}'.format(data.size))
-    #print('randoms : {}'.format(randoms.size))
-    #sys.exit()
     mpicomm = data.mpicomm
     
     t0 = time.time()
@@ -280,10 +277,12 @@ def main():
         minboxsize = 8000
         #boxsizes = [200000, 50000, 10000]
         boxsizes = [20*minboxsize, 5*minboxsize, minboxsize]
-        power_fn = os.path.join(output_dir, 'pk', naming(filetype='power', data_type=data_shortname, imock=imock, tracer=tracer, completeness=completeness, region=region, highres=True))
-        power = CatalogFFTPower.load(power_fn).poles
-        #power_fn = os.path.join('/global/cfs/cdirs/desi/survey/catalogs/Y1/mocks/SecondGenMocks/AbacusSummit/mock{:d}/pk/pkpoles_{}_{}gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}.npy'.format(imock, tracer, completeness, region, zrange[tracer[:3]][0], zrange[tracer[:3]][1], '_rpcut{:.1f}'.format(rp_cut) if rp_cut else ''))
-        #power = PowerSpectrumStatistics.load(power_fn)
+        power_fn = LocalFileName().set_default_config(mockgen=mockgen, version=version, tracer=tracer, region=region, zrange=(zmin, zmax),
+                                                      completeness=completeness, weighting=kwargs['weighting'], rpcut=rpcut, thetacut=thetacut, nran=nrandoms,
+                                                      cellsize=cellsize, boxsize=minboxsize, 
+                                                      directedges=(bool(rpcut) or bool(thetacut)) and direct, directmax=directmax)
+        # need to check                             
+        power = CatalogFFTPower.load(power_fn.get_path()).poles
 
         direct_edges = {'min': 0, 'step': 0.1}  if direct else None #{'step': 0.1, 'max': 5000.} if direct else None
         direct_attrs = {'nthreads': 64} if direct else None
@@ -294,7 +293,7 @@ def main():
         else:
             direct_selection_attrs = None
         
-        if data_shortname=='Y1secondgenmocks':
+        if mockgen=='second':
             # Use 1 random file for each realization to compute the window
             allrandoms = list()
             for i in range(25):
@@ -305,14 +304,14 @@ def main():
         
         randoms_positions = get_rdd(randoms)
         
-        window_fn = os.path.join(output_dir, 'windows', naming(filetype='window', data_type=data_shortname, imock=imock, tracer=tracer, completeness=completeness, region=region, cellsize=None, boxsize=None, rpcut=rp_cut, thetacut=theta_cut, direct_edges=direct))
-        #window_fn = os.path.join(output_dir, 'windows', 'window_{}_{}gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{{}}.npy'.format(tracer, completeness, region, zrange[tracer[:3]][0], zrange[tracer[:3]][1], '_rpcut{:.1f}'.format(rp_cut) if rp_cut else ''))
+        # need to check                             
+        window_fn = power_fn.update(ftype='window_smooth', realization=imock, boxscale='{}').get_path()
 
     if todo == 'window':
         print('Compute window function')
-        for boxsize in boxsizes:
-            window = CatalogSmoothWindow(randoms_positions1=randoms_positions, power_ref=power, edges={'step': 1e-4}, boxsize=boxsize, position_type='rdd', direct_selection_attrs=direct_selection_attrs, direct_edges=direct_edges).poles
-            if mpicomm.rank == 0: window.save(window_fn.format('_boxsize{}'.format(int(boxsize))))
+        for boxscale in [20, 5, 1]:
+            window = CatalogSmoothWindow(randoms_positions1=randoms_positions, power_ref=power, edges={'step': 1e-4}, boxsize=boxscale*minboxsize, position_type='rdd', direct_selection_attrs=direct_selection_attrs, direct_edges=direct_edges).poles
+            if mpicomm.rank == 0: window.save(window_fn.format(int(boxscale)))
     
     if todo == 'wmatrix':
          if mpicomm.rank == 0:
@@ -323,9 +322,9 @@ def main():
                 wm = PowerSpectrumSmoothWindowMatrix(power, projsin=(0, 2, 4), window=window.to_real(sep=sep), kin_lim=(1e-4, 1.), sep=sep)
             else:
                 wm = PowerSpectrumSmoothWindowMatrix(power, projsin=(0, 2, 4), window=window.to_real(sep=sep).select(rp=(rp_cut, np.inf)), kin_lim=(1e-4, 1.), sep=sep)
-            wm_fn = os.path.join(output_dir, 'windows', naming(filetype='wm', data_type=data_shortname, imock=imock, tracer=tracer, completeness=completeness, region=region, cellsize=cellsize, boxsize=None, rpcut=rp_cut, thetacut=theta_cut, direct_edges=direct))
-            #wm_fn = os.path.join(output_dir, 'windows', 'wmatrix_smooth_{}_{}gtlimaging_{}_{:.1f}_{:.1f}_default_lin{}{}.npy'.format(tracer, completeness, region, zrange[tracer[:3]][0], zrange[tracer[:3]][1], '_rpcut{:.1f}'.format(rp_cut) if rp_cut else '', '_directedges' if direct else ""))
-            wm.save(wm_fn.format('_minboxsize{}'.format(int(minboxsize))))
+            # need to check                             
+            wm_fn = power_fn.update(ftype='wmatrix_smooth', boxscale=None).get_path()
+            wm.save(wm_fn)
 
     if 'counter' in todo:
         
@@ -354,7 +353,7 @@ def main():
             
         ## RR counts
         elif 'rr' in todo:
-            print('randoms size 4:', randoms.size)
+            print('randoms size:', randoms.size)
             np.random.seed(0)
             print('Downsampling randoms by a factor {}.'.format(downsamprandoms))
             downsampmask = np.random.uniform(0., 1., randoms.size) <= downsamprandoms
@@ -384,22 +383,24 @@ def main():
                 print('Saving RR counts: {}'.format(output_fn))
 
             elif 'rp' in todo:
-                xi = TwoPointCounter('rppi', edges=(np.linspace(0., 1, 1001), np.linspace(-80., 80., 161)), 
+                xi = TwoPointCounter('rppi', edges=(np.linspace(0., 10, 1001), np.linspace(-80., 80., 161)), 
                                      positions1=np.array(get_rdd(randoms))[:, downsampmask], 
                                      weights1=randoms[weights][downsampmask].astype('f8') if bool(weights) else None,
                                      los='midpoint', engine='corrfunc', position_type='rdd', nthreads=64, mpicomm=data.mpicomm, dtype='f8')
 
                 zinfo = '{:.1f}_{:.1f}_'.format(zmin, zmax)
-                output_fn = '{}rrcounts_rppi_mock{:d}_{}_{}_{}_{}{}rpmax1'.format((sample+'_') if sample is not None else '', imock, tracer, completeness, region, zinfo, weights + ('_' if weights else ''))
+                output_fn = '{}rrcounts_rppi_mock{:d}_{}_{}_{}_{}{}rpmax10'.format((sample+'_') if sample is not None else '', imock, tracer, completeness, region, zinfo, weights + ('_' if weights else ''))
                 print('Saving RR counts: {}'.format(output_fn))
                 
         else:
-            smax = 4
-            xi = TwoPointCounter('rppi', edges=(np.linspace(0., smax, 401), np.linspace(-80., 80., 81)),
+            smax = 10
+            xi = TwoPointCounter('rppi', edges=(np.linspace(0., smax, 1001), np.linspace(-80., 80., 81)),
                  positions1=np.array(get_rdd(data)), weights1=data['WEIGHT'].astype('f8'),
                  los='midpoint', engine='corrfunc', position_type='rdd', nthreads=64, mpicomm=data.mpicomm, dtype='f8')
 
-            output_fn = 'ddcounts_rppi_mock{:d}_{}_{}{}_{:.1f}_{:.1f}_smax4'.format(imock, tracer, 'complete_' if completeness else 'ffa_', region, zmin, zmax)
+            zinfo = '{:.1f}_{:.1f}_'.format(zmin, zmax)
+            output_fn = '{}ddcounts_rppi_mock{:d}_{}_{}_{}_{}{}rpmax10'.format((sample+'_') if sample is not None else '', imock, tracer, completeness, region, zinfo, weights + ('_' if weights else ''))
+            print('Saving DD counts: {}'.format(output_fn))
         
         xi.save(os.path.join(output_dir, 'paircounts', output_fn))
 
