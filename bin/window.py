@@ -98,16 +98,16 @@ class WindowRotation(BaseClass):
         weights_wmatrix_denom = np.empty_like(self.wmatrix.value.T)
         eps=np.finfo(float).eps
         for io, ko in enumerate(kout):
-            weights_wmatrix[io, :] = np.minimum(((kin - ko) / self.bandwidth)**2 + factor_diff_ell * (ellsout[io] != ellsin), max_sigma_W**2)
-            #weights_wmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsin)  # off-diagonal blocks
-            weights_wmatrix_denom[io, :] = (weights_wmatrix[io, : ] + eps) / (((kin - ko) / self.bandwidth)**2 + factor_diff_ell * (ellsout[io] != ellsin) + eps)
+            weights_wmatrix[io, :] = np.minimum(((kin - ko) / self.bandwidth)**2, max_sigma_W**2)
+            weights_wmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsin)  # off-diagonal blocks
+            #weights_wmatrix_denom[io, :] = (weights_wmatrix[io, : ] + eps) / (((kin - ko) / self.bandwidth)**2 + factor_diff_ell * (ellsout[io] != ellsin) + eps)
         
         weights_covmatrix = np.empty_like(self.covmatrix)
         weights_covmatrix_denom = np.empty_like(self.covmatrix)
         for io, ko in enumerate(kout):
-            weights_covmatrix[io, :] = np.minimum(((kout - ko) / self.bandwidth)**2 + factor_diff_ell * (ellsout[io] != ellsout), max_sigma_R**2)
-            #weights_covmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsout)  # off-diagonal blocks
-            weights_covmatrix_denom[io, :] = (weights_covmatrix[io, :] + eps) / (((kout - ko) / self.bandwidth)**2 + factor_diff_ell * (ellsout[io] != ellsout) + eps)
+            weights_covmatrix[io, :] = np.minimum(((kout - ko) / self.bandwidth)**2, max_sigma_R**2)
+            weights_covmatrix[io, :] += factor_diff_ell * (ellsout[io] != ellsout)  # off-diagonal blocks
+            #weights_covmatrix_denom[io, :] = (weights_covmatrix[io, :] + eps) / (((kout - ko) / self.bandwidth)**2 + factor_diff_ell * (ellsout[io] != ellsout) + eps)
         #weights_wmatrix = jax.device_put(weights_wmatrix)
         #weights_covmatrix = jax.device_put(weights_covmatrix)
         
@@ -422,7 +422,7 @@ if __name__ == '__main__':
     kolim = (0., 0.4)
     korebin = 5
     ktmax = 0.5
-    ktrebin = 10
+    ktrebin = 1
 
     thetacut = 0.05
     
@@ -439,7 +439,7 @@ if __name__ == '__main__':
     mmatrix, state = window_rotation.fit(Minit='momt' if thetacut else None, max_sigma_W=max_sigma_W, max_sigma_R=max_sigma_R, factor_diff_ell=factor_diff_ell, csub=csub)
     
     output_dir = "/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/rotated_window".format(version)        
-    output_fn = LocalFileName().set_default_config(ftype='rotated_all', tracer=tracer, region=region, 
+    output_fn = LocalFileName().set_default_config(ftype='rotated_all_test', tracer=tracer, region=region, 
                                                    completeness=completeness, realization=None, weighting=None, 
                                                    thetacut=thetacut)
     
