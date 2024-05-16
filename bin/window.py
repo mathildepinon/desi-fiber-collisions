@@ -122,11 +122,11 @@ class WindowRotation(BaseClass):
         def loss(mmatrix):
             Wp, Cp = self.rotate(mmatrix=mmatrix)
             if with_momt: mmatrix = mmatrix[0]
-            #loss_W = jnp.sum(softabs(Wp * weights_wmatrix)) / jnp.sum(softabs(Wp) * (weights_wmatrix > 0))
-            loss_W = jnp.sum(softabs(Wp * weights_wmatrix)) / jnp.sum(softabs(Wp) * weights_wmatrix_denom)
+            loss_W = jnp.sum(softabs(Wp * weights_wmatrix)) / jnp.sum(softabs(Wp) * (weights_wmatrix > 0))
+            #loss_W = jnp.sum(softabs(Wp * weights_wmatrix)) / jnp.sum(softabs(Wp) * weights_wmatrix_denom)
             Rp = RfromC(Cp)
-            #loss_C = jnp.sum(softabs(Rp * weights_covmatrix)) / jnp.sum(softabs(Rp) * (weights_covmatrix > 0))
-            loss_C = jnp.sum(softabs(Rp * weights_covmatrix)) / jnp.sum(softabs(Rp) * weights_covmatrix_denom)
+            loss_C = jnp.sum(softabs(Rp * weights_covmatrix)) / jnp.sum(softabs(Rp) * (weights_covmatrix > 0))
+            #loss_C = jnp.sum(softabs(Rp * weights_covmatrix)) / jnp.sum(softabs(Rp) * weights_covmatrix_denom)
             loss_M = 10 * jnp.sum((jnp.sum(mmatrix, axis=1) - 1.)**2)
             #print(loss_W, loss_C, weights_wmatrix.sum(), weights_covmatrix.sum(), weights_wmatrix.shape, weights_covmatrix.shape)
             return loss_W + loss_C + loss_M
@@ -419,12 +419,12 @@ if __name__ == '__main__':
     
     ells = [0, 2, 4]
     
-    kolim = (0.02, 0.2)
+    kolim = (0., 0.4)
     korebin = 5
     ktmax = 0.5
     ktrebin = 10
 
-    thetacut = 0.
+    thetacut = 0.05
     
     max_sigma_W = 5
     max_sigma_R = 5
