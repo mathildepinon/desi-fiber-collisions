@@ -351,7 +351,7 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
     return data, wmatrix, cov, systematic_templates, shotnoise, x, mmatrix
 
 
-def get_observable_likelihood(observable_name='power', theory_name='velocileptors', template_name='shapefitqisoqap', solve=True, sculpt_window=False, fixed_sn=False, systematic_priors=None, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), **kwargs):
+def get_observable_likelihood(observable_name='power', theory_name='velocileptors', template_name='shapefitqisoqap', solve=True, sculpt_window=False, fixed_sn=False, systematic_priors=None, withshotnoise=True, save_emulator=False, emulator_fn=os.path.join('.', 'power_{}.npy'), **kwargs):
 
     from desilike.observables.galaxy_clustering import TracerPowerSpectrumMultipolesObservable, TracerCorrelationFunctionMultipolesObservable
     from desilike.likelihoods import ObservablesGaussianLikelihood
@@ -409,7 +409,7 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
             
             from desilike.samples import Profiles
             profile_cutsky = Profiles.load(os.path.join(profiles_dir, 'physicalpriorbasis',
-                                                        'power_velocileptors_{}cov{}_sculptwindow_fixedsn.npy'.format('ezmocks', cutflag)))
+                                                        'power_velocileptors_{}cov{}_sculptwindow_fixedsn{}.npy'.format('ezmocks', cutflag, '_withshotnoise' if withshotnoise else '')))
             fid_priors = [profile_cutsky.bestfit['syst_{}'.format(i)][0] for i in range(len(ells))]
             for i in range(len(ells)):
                 systematic_templates.init.params['syst_{}'.format(i)].update(prior=dict(dist='norm', loc=0, scale=systematic_priors*fid_priors[i]), derived='.best')    
@@ -418,14 +418,23 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
         systematic_templates = None
         
     if observable_name == 'power':
-        if shotnoise is None:
-            observable = TracerPowerSpectrumMultipolesObservable(klim=xlim,
-                                                                 #kin=np.arange(0.001, 0.35, 0.001),
-                                                                 data=data,
-                                                                 wmatrix=wmatrix,
-                                                                 theory=theory,
-                                                                 #shotnoise = None, # test
-                                                                 systematic_templates=systematic_templates)
+        if not sculpt_window:
+            if withshotnoise:
+                observable = TracerPowerSpectrumMultipolesObservable(klim=xlim,
+                                                                     #kin=np.arange(0.001, 0.35, 0.001),
+                                                                     data=data,
+                                                                     wmatrix=wmatrix,
+                                                                     theory=theory,
+                                                                     systematic_templates=systematic_templates)
+            else:
+                observable = TracerPowerSpectrumMultipolesObservable(klim=xlim,
+                                                                     #kin=np.arange(0.001, 0.35, 0.001),
+                                                                     data=data,
+                                                                     wmatrix=wmatrix,
+                                                                     theory=theory,
+                                                                     shotnoise=None,
+                                                                     systematic_templates=systematic_templates)
+                
         else:
             observable = TracerPowerSpectrumMultipolesObservable(k=x,
                                                                  ells=(0, 2, 4),
@@ -434,7 +443,7 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
                                                                  data=data,
                                                                  wmatrix=wmatrix,
                                                                  theory=theory,
-                                                                 shotnoise=shotnoise,
+                                                                 shotnoise=shotnoise if withshotnoise else None,
                                                                  systematic_templates=systematic_templates)
             
         
@@ -512,6 +521,7 @@ if __name__ == '__main__':
     parser.add_argument('--fixed_sn', type=bool, required=False, default=False)
     parser.add_argument('--systematic_priors', type=float, required=False, default=None)
     parser.add_argument('--ktmax', type=float, required=False, default=0.35)
+    parser.add_argument('--shotnoise', type=bool, required=False, default=True)
     args = parser.parse_args()
     
     ktlim = (0.001, args.ktmax)
@@ -544,33 +554,33 @@ if __name__ == '__main__':
     if 'profiling' in args.todo:
         from desilike.profilers import MinuitProfiler
         
-        profile_fn = os.path.join(profiles_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}{}.npy'.format(args.observable, '_mock{}'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_fixedsn' if args.fixed_sn else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
+        profile_fn = os.path.join(profiles_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}{}{}.npy'.format(args.observable, '_mock{}'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_fixedsn' if args.fixed_sn else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if (args.observable=='power' and args.shotnoise) else ''))
         
-        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, covtype=args.covtype, emulator_fn=emulator_fn, footprint_fn=footprint_fn, solve=True, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, sculpt_window=args.sculpt_window, fixed_sn=args.fixed_sn, systematic_priors=args.systematic_priors)
+        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, covtype=args.covtype, emulator_fn=emulator_fn, footprint_fn=footprint_fn, solve=True, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, sculpt_window=args.sculpt_window, fixed_sn=args.fixed_sn, systematic_priors=args.systematic_priors, withshotnoise=args.shotnoise)
         profiler = MinuitProfiler(likelihood, seed=43, save_fn=profile_fn)
         profiler.maximize(niterations=3)
-        profiler.interval('b1p')
+        #profiler.interval('b1p')
              
     if 'sampling' in args.todo:
         from desilike.samplers import EmceeSampler
 
-        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}{}_*.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_centeredpriors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if args.observable=='power' else ''))
+        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}{}_*.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_centeredpriors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if (args.observable=='power' and args.shotnoise) else ''))
 
-        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
+        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, withshotnoise=args.shotnoise, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
         sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=42, save_fn=chain_fn)
-        sampler.run(check={'max_eigen_gr': 0.03})
+        sampler.run(check={'max_eigen_gr': 0.02})
                     
     if 'importance' in args.todo:
         from desilike.samplers import ImportanceSampler
         from desilike.samples import Chain
         
-        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if args.observable=='power' else ''))
+        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if (args.observable=='power' and args.shotnoise) else ''))
 
-        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
+        likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, withshotnoise=args.shotnoise, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
         chain = Chain.concatenate([Chain.load(chain_fn.format(i)).remove_burnin(0.5)[::10] for i in range(8)])
         chain.aweight[...] *= np.exp(chain.logposterior.max() - chain.logposterior)
 
-        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_importance_{}{}_{}cov{}{}{}{}{}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if args.observable=='power' else ''))
+        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_importance_{}{}_{}cov{}{}{}{}{}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if (args.observable=='power' and args.shotnoise) else ''))
 
         sampler = ImportanceSampler(likelihood, chain, save_fn=chain_fn)
         sampler.run()
