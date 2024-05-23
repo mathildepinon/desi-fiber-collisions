@@ -66,8 +66,6 @@ def get_theory(theory_name='velocileptors', observable_name='power', b1E=1.9, te
     """A simple wrapper that returns the theory of interest."""
 
     from desilike.theories.galaxy_clustering import (LPTVelocileptorsTracerPowerSpectrumMultipoles, LPTVelocileptorsTracerCorrelationFunctionMultipoles,
-                                                     LPTMomentsVelocileptorsTracerPowerSpectrumMultipoles, LPTMomentsVelocileptorsTracerCorrelationFunctionMultipoles,
-                                                     EPTMomentsVelocileptorsTracerPowerSpectrumMultipoles, EPTMomentsVelocileptorsTracerCorrelationFunctionMultipoles,
                                                      PyBirdTracerPowerSpectrumMultipoles, PyBirdTracerCorrelationFunctionMultipoles,
                                                      FOLPSTracerPowerSpectrumMultipoles, FOLPSTracerCorrelationFunctionMultipoles,
                                                      DampedBAOWigglesTracerPowerSpectrumMultipoles, DampedBAOWigglesTracerCorrelationFunctionMultipoles,
@@ -86,11 +84,11 @@ def get_theory(theory_name='velocileptors', observable_name='power', b1E=1.9, te
         Theory = LPTVelocileptorsTracerPowerSpectrumMultipoles if observable_name == 'power' else LPTVelocileptorsTracerCorrelationFunctionMultipoles
         kwargs.update(prior_basis='physical')
         #kwargs.update(prior_basis='standard', use_Pzel=True)
-    elif 'lptm' in theory_name:
-        Theory = LPTMomentsVelocileptorsTracerPowerSpectrumMultipoles if observable_name == 'power' else LPTMomentsVelocileptorsTracerCorrelationFunctionMultipoles
-    elif 'eptm' in theory_name:
-        euler = True
-        Theory = EPTMomentsVelocileptorsTracerPowerSpectrumMultipoles if observable_name == 'power' else EPTMomentsVelocileptorsTracerCorrelationFunctionMultipoles
+    #elif 'lptm' in theory_name:
+    #    Theory = LPTMomentsVelocileptorsTracerPowerSpectrumMultipoles if observable_name == 'power' else LPTMomentsVelocileptorsTracerCorrelationFunctionMultipoles
+    #elif 'eptm' in theory_name:
+    #    euler = True
+    #    Theory = EPTMomentsVelocileptorsTracerPowerSpectrumMultipoles if observable_name == 'power' else EPTMomentsVelocileptorsTracerCorrelationFunctionMultipoles
     elif 'dampedbao' in theory_name:
         euler = True
         kwargs.update(recon or {})
@@ -181,7 +179,7 @@ def get_fit_setup(tracer, ells=None, observable_name='power', theory_name='veloc
     return [toret[name] for name in toret]
 
 
-def get_fit_data(observable_name='power', source='desi', catalog='second', version='v3', tracer='ELG', region='NGC', z=None, zrange=None, completeness='complete', rpcut=0, thetacut=0, xinlim=(0.001, 0.35), xinrebin=10, direct=True, imock=None, sculpt_window=False, xlim=None, priors=None, covtype='analytic', footprint_fn=os.path.join('.', 'footprints', 'footprint_{}{}.npy'), mmatrix_flag=True):
+def get_fit_data(observable_name='power', source='desi', catalog='second', version='v3', tracer='ELG', region='NGC', z=None, zrange=None, completeness='complete', rpcut=0, thetacut=0, xinlim=(0.001, 0.35), xinrebin=1, direct=True, imock=None, sculpt_window=False, xlim=None, priors=None, covtype='analytic', footprint_fn=os.path.join('.', 'footprints', 'footprint_{}{}.npy'), mmatrix_flag=True):
     
     from desilike.observables.galaxy_clustering import ObservablesCovarianceMatrix, CutskyFootprint, SystematicTemplatePowerSpectrumMultipoles
     from pypower import PowerSpectrumSmoothWindowMatrix
@@ -189,6 +187,22 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
     ells = (0, 2, 4)
     
     if observable_name == 'power':
+        
+        xlimcov = xlim if not sculpt_window else {ell: (0., 0.4, 0.005) for ell in ells}
+        
+        if covtype == 'analytic':
+            cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_gaussian_pre_{}_{}_{:.1f}_{:.1f}_default_FKP_lin.txt'.format(tracer, region, zrange[0], zrange[1])
+            cov = np.loadtxt(cov_fn)
+            cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*xlimcov[0]))
+        elif 'ezmocks' in covtype:
+            print('EZmocks covariance.')
+            cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}{}.npy'.format(tracer[:7], region, zrange[0], zrange[1], xlimcov[0][0], xlimcov[0][1], '_thetacut{:.2f}'.format(thetacut) if thetacut and (covtype=='ezmocks') else '')
+            if not os.path.isfile(cov_fn):
+                cov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=xlimcov[0], rpcut=rpcut, thetacut=thetacut if (covtype=='ezmocks') else 0, return_x=False, hartlap=False)
+                np.save(cov_fn, cov)
+            else:
+                print('Loading EZmocks covariance: {}'.format(cov_fn))
+                cov = np.load(cov_fn)
     
         # cubic mocks
         if 'cubic' in catalog:
@@ -202,6 +216,12 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
             elif source == 'desi':
                 data_fn = DESIFileName().set_default_config(mocktype='SecondGenMocks/CubicBox', version=version, tracer=tracer, zrange=z, 
                                                             realization=imock if imock is not None else '*', los='[a-z]')
+            
+            data = data_fn.get_path()
+            shotnoise = None
+            systematic_templates = None
+            x = None
+            mmatrix = None
 
         # cutsky mocks or data
         else:
@@ -222,105 +242,75 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
 
             data_fn.update(realization=imock if imock is not None else 'mock*', rpcut=rpcut, thetacut=thetacut)
 
-        if not sculpt_window:
-            data = data_fn.get_path()
-            shotnoise = None
-            systematic_templates = None
-            x = None
-            
-            wmatrix = PowerSpectrumSmoothWindowMatrix.load(wm_fn.get_path(rpcut=rpcut, thetacut=thetacut))
-            wmatrix.select_x(xinlim=xinlim)
-            wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // xinrebin * xinrebin, xinrebin))
-            wmatrix.select_x(xoutlim=xlim[0])
-            korebin=5
-            wmatrix.slice_x(sliceout=slice(0, len(wmatrix.xout[0]) // korebin * korebin, korebin))
-            
-            if covtype == 'analytic':
-                cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_gaussian_pre_{}_{}_{:.1f}_{:.1f}_default_FKP_lin.txt'.format(tracer, region, zrange[0], zrange[1])
-                cov = np.loadtxt(cov_fn)
-                cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*xlim[0]))
-            elif 'ezmocks' in covtype:
-                print('EZmocks covariance.')
-                cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}{}.npy'.format(tracer[:7], region, zrange[0], zrange[1], xlim[0][0], xlim[0][1], '_thetacut{:.2f}'.format(thetacut) if thetacut and (covtype=='ezmocks') else '')
-                if not os.path.isfile(cov_fn):
-                    cov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=xlim[0], rpcut=rpcut, thetacut=thetacut if (covtype=='ezmocks') else 0, return_x=False, hartlap=False)
-                    np.save(cov_fn, cov)
-                else:
-                    print('Loading EZmocks covariance: {}'.format(cov_fn))
-                    cov = np.load(cov_fn)
-                    
-            mmatrix = None
-                    
-        # when sculpting window with rp/theta-cut
-        else:
-            from window import WindowRotation
-
-            rotation_dir = os.path.join("/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/rotated_window".format(version))
-            rotatedwm_fn = LocalFileName().set_default_config(ftype='rotated_all', tracer=tracer, region=region, completeness=completeness, realization=None, weighting=None, rpcut=rpcut, thetacut=thetacut, zrange=zrange)
-            #rotatedwm_fn.rotation_attrs['covtype'] = covtype 
-            #NB: always using the analytic cov matrix to define the rotation (default)
-            rotatedwm_fn.rotation_attrs['csub'] = False
-            rotatedwm_fn.update(fdir=rotation_dir, cellsize=None, boxsize=None, directedges=False)
-            print('rotated window path:', rotatedwm_fn.get_path())
-            rotatedwm = WindowRotation.load(rotatedwm_fn.get_path())
-             
-            masko = (np.arange(0, 0.4, 0.005) >= xlim[0][0]) & (np.arange(0, 0.4, 0.005) < xlim[0][1])
-            masko_flat = np.concatenate((masko, )*len(ells))
-            maskt = (rotatedwm.kin[0] >= xinlim[0]) & (rotatedwm.kin[0] < xinlim[1])            
-            maskt_flat = np.concatenate((maskt, )*len(ells))
-            
-            if isinstance(rotatedwm.mmatrix, tuple):
-                if len(rotatedwm.mmatrix)>3:
-                    mmatrix, mo, mt, m = rotatedwm.mmatrix
-                else:
-                    mmatrix, mo, mt = rotatedwm.mmatrix
-                mmatrix = mmatrix[np.ix_(masko_flat, masko_flat)]
-                mo = [mo[0][masko_flat], mo[1][masko_flat], mo[2][masko_flat]]
-                mt = [mt[0][maskt_flat], mt[1][maskt_flat], mt[2][maskt_flat]]
-                systematic_templates = SystematicTemplatePowerSpectrumMultipoles(templates=mo)
-                if len(rotatedwm.mmatrix)>3:
-                    mmatrix = (mmatrix, mo, mt, m)
-                else:
-                    mmatrix = (mmatrix, mo, mt)
-            else:
-                mmatrix = rotatedwm.mmatrix
-                mmatrix = mmatrix[np.ix_(masko_flat, masko_flat)]
+            if not sculpt_window:
+                data = data_fn.get_path()
+                shotnoise = None
                 systematic_templates = None
-                
-            if not mmatrix_flag:
-                mmatrix = np.eye(len(mmatrix))
-            
-            wmatrix = rotatedwm.wmatrix
-            wmatrix.select_x(xinlim=xinlim)
-            # wmatrix must be rebinned before the rotation if needed
-            #wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // xinrebin * xinrebin, xinrebin))
-            wmatrix.select_x(xoutlim=xlim[0])
- 
-            if 'ezmocks' in covtype:
-                cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/cov_EZmocks_{}_ffa_{}_z{:.3f}-{:.3f}_k{:.2f}-{:.2f}{}.npy'.format(tracer[:7], region, zrange[0], zrange[1], xlim[0][0], xlim[0][1], '_thetacut{}'.format(thetacut) if thetacut and (covtype=='ezmocks') else '')
-                if not os.path.isfile(cov_fn):
-                    ezcov = get_EZmocks_covariance(stat='pkpoles', tracer=tracer, region=region, zrange=zrange, completeness='ffa', ells=(0, 2, 4), select=xlim[0], rpcut=rpcut, thetacut=thetacut, return_x=False, hartlap=False)
-                    np.save(cov_fn, ezcov)
-                else:
-                    ezcov = np.load(cov_fn)
-                cov = ezcov
+                x = None
+                mmatrix = None
+
+                wmatrix = PowerSpectrumSmoothWindowMatrix.load(wm_fn.get_path(rpcut=rpcut, thetacut=thetacut))
+                wmatrix.select_x(xinlim=xinlim)
+                #wmatrix.slice_x(slicein=slice(0, len(wmatrix.xin[0]) // xinrebin * xinrebin, xinrebin))
+                wmatrix.select_x(xoutlim=xlim[0])
+                korebin=5
+                wmatrix.slice_x(sliceout=slice(0, len(wmatrix.xout[0]) // korebin * korebin, korebin))
+
+            # when sculpting window with rp/theta-cut
             else:
-                cov = rotatedwm.covmatrix
+                from window import WindowRotation
+
+                rotation_dir = os.path.join("/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/rotated_window".format(version))
+                rotatedwm_fn = LocalFileName().set_default_config(ftype='rotated_all', tracer=tracer, region=region, completeness=completeness, realization=None, weighting=None, rpcut=rpcut, thetacut=thetacut, zrange=zrange)
+                #rotatedwm_fn.rotation_attrs['covtype'] = covtype 
+                # NB: always using the analytic cov matrix to define the rotation (default)
+                rotatedwm_fn.rotation_attrs['csub'] = False
+                rotatedwm_fn.update(fdir=rotation_dir, cellsize=None, boxsize=None, directedges=False)
+                print('rotated window path:', rotatedwm_fn.get_path())
+                rotatedwm = WindowRotation.load(rotatedwm_fn.get_path())
+                wmatrix = rotatedwm.wmatrix
+                rotatedwm.set_covmatrix(cov)
+
+                #masko = (np.arange(0, 0.4, 0.005) >= xlim[0][0]) & (np.arange(0, 0.4, 0.005) < xlim[0][1])
+                #masko_flat = np.concatenate((masko, )*len(ells))
+                #maskt = (rotatedwm.kin[0] >= xinlim[0]) & (rotatedwm.kin[0] < xinlim[1])            
+                #maskt_flat = np.concatenate((maskt, )*len(ells))
+ 
+                power = load_poles_list([data_fn.get_path(realization=i).format(i) for i in range(25)], xlim={ell: (0., 0.4, 0.005) for ell in ells})
+                data = power['data'].flatten()
+                x = power['k']
+                shotnoise = np.zeros_like(power['data'])
+                shotnoise[0] = power['shotnoise']
+                data = data + shotnoise.flatten()
+                
+                # apply rotation
+                wm, cov, data = rotatedwm.rotate(obs=data)
+                wmatrix.value = wm.T
+                data = data - shotnoise.flatten()
+                shotnoise = power['shotnoise']
+                
+                # scale cuts
+                wmatrix.select_x(xinlim=xinlim)
+                wmatrix.select_x(xoutlim=xlim[0])
                 cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(*xlim[0]))
-        
-            power = load_poles_list([data_fn.get_path(realization=i).format(i) for i in range(25)], xlim=xlim)
-            data = power['data'].flatten()
-            x = power['k']
-            
-            # apply rotation
-            rotatedwm.set_wmatrix(wmatrix)
-            rotatedwm.set_covmatrix(cov)
-            wm, cov, data = rotatedwm.rotate(mmatrix=mmatrix, obs=data)
-            wmatrix.value = wm.T
-            shotnoise = np.zeros_like(power['data'])
-            shotnoise[0] = power['shotnoise']
-            #print(np.matmul(mmatrix, shotnoise.flatten()))
-            shotnoise =  power['shotnoise']#np.mean(np.matmul(mmatrix, shotnoise.flatten()))
+                masko = (np.arange(0, 0.4, 0.005) >= xlim[0][0]) & (np.arange(0, 0.4, 0.005) < xlim[0][1])
+                masko_flat = np.concatenate((masko, )*len(ells))
+                data = data[masko_flat]
+                x = [x[ill][masko] for ill in range(len(ells))]
+                
+                if isinstance(rotatedwm.mmatrix, tuple):
+                    if len(rotatedwm.mmatrix)>3:
+                        mmatrix, mo, mt, m = rotatedwm.mmatrix
+                    else:
+                        mmatrix, mo, mt = rotatedwm.mmatrix
+                    mo = [mo[ill][masko_flat] for ill in range(len(ells))]
+                    systematic_templates = SystematicTemplatePowerSpectrumMultipoles(templates=mo)
+                else:
+                    mmatrix = rotatedwm.mmatrix
+                    systematic_templates = None
+
+                if not mmatrix_flag:
+                    mmatrix = np.eye(len(mmatrix))
             
     if observable_name == 'corr':
         
@@ -418,7 +408,8 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
             else: cutflag = ''
             
             from desilike.samples import Profiles
-            profile_cutsky = Profiles.load(os.path.join(profiles_dir, 'power_velocileptors_{}cov{}_sculptwindow_fixedsn.npy'.format('ezmocks', cutflag)))
+            profile_cutsky = Profiles.load(os.path.join(profiles_dir, 'physicalpriorbasis',
+                                                        'power_velocileptors_{}cov{}_sculptwindow_fixedsn.npy'.format('ezmocks', cutflag)))
             fid_priors = [profile_cutsky.bestfit['syst_{}'.format(i)][0] for i in range(len(ells))]
             for i in range(len(ells)):
                 systematic_templates.init.params['syst_{}'.format(i)].update(prior=dict(dist='norm', loc=0, scale=systematic_priors*fid_priors[i]), derived='.best')    
@@ -433,7 +424,7 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
                                                                  data=data,
                                                                  wmatrix=wmatrix,
                                                                  theory=theory,
-                                                                 shotnoise=None,
+                                                                 #shotnoise = None, # test
                                                                  systematic_templates=systematic_templates)
         else:
             observable = TracerPowerSpectrumMultipolesObservable(k=x,
@@ -443,7 +434,7 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
                                                                  data=data,
                                                                  wmatrix=wmatrix,
                                                                  theory=theory,
-                                                                 shotnoise=None,
+                                                                 shotnoise=shotnoise,
                                                                  systematic_templates=systematic_templates)
             
         
@@ -484,7 +475,7 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
     if save_emulator:
         likelihood()
         from desilike.emulators import Emulator, TaylorEmulatorEngine
-        emulator = Emulator(theory.pt, engine=TaylorEmulatorEngine(order=4))
+        emulator = Emulator(theory.pt, engine=TaylorEmulatorEngine(method='finite', order=4))
         emulator.set_samples()
         emulator.fit()
         print('Saving emulator.')
@@ -502,7 +493,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Emulator fit')
     parser.add_argument('--source', type=str, required=False, default='desi', choices=['desi', 'local'])
     parser.add_argument('--catalog', type=str, required=False, default='second', choices=['first', 'second', 'cubic', 'raw', 'data'])
-    parser.add_argument('--version', type=str, required=False, default='v3', choices=['v1', 'v1.1', 'v2', 'v3', 'v3_1', 'v4', 'v4_1'])
+    parser.add_argument('--version', type=str, required=False, default='v3', choices=['v1', 'v1.1', 'v2', 'v3', 'v3_1', 'v4', 'v4_1', 'v4_1fixran'])
     parser.add_argument('--tracer', type=str, required=False, default='ELG')
     parser.add_argument('--region', type=str, required=False, default='SGC', choices=['NGC', 'SGC', 'NS', 'SS', 'GCcomb', ''])
     parser.add_argument('--z', type=float, required=False, default=None)
@@ -535,11 +526,11 @@ if __name__ == '__main__':
         chains_dir = os.path.join(output_dir, theory_dir, 'chains', 'chains_{}_{}'.format(template_name, args.tracer))
 
     elif args.catalog == 'second':
-        output_dir = '/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/'.format(args.version)
+        output_dir = '/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}'.format(args.version)
         profiles_dir = os.path.join(output_dir, theory_dir, 'profiles', 'profiles_{}_{}_{}_{}_{}_{}'.format(template_name, args.tracer, args.zmin, args.zmax, args.completeness, args.region))
         chains_dir = os.path.join(output_dir, theory_dir, 'chains', 'chains_{}_{}_z{:.3f}-z{:.3f}_{}_{}'.format(template_name, args.tracer, args.zmin, args.zmax, args.completeness, args.region))
     
-    footprint_fn=os.path.join(output_dir, 'footprints', 'footprint_{}{}.npy')        
+    footprint_fn= os.path.join(output_dir, 'footprints', 'footprint_{}{}.npy')        
     emulator_dir = os.path.join(output_dir, theory_dir, 'emulators', 'emulators_{}_{}_z{:.3f}{}'.format(template_name, args.tracer[:7], args.z, ktmax_flag))
     emulator_fn=os.path.join(emulator_dir, '{}_{{}}.npy'.format(args.observable))
     
@@ -563,23 +554,23 @@ if __name__ == '__main__':
     if 'sampling' in args.todo:
         from desilike.samplers import EmceeSampler
 
-        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}_*.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_centeredpriors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
+        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}{}_*.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_centeredpriors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if args.observable=='power' else ''))
 
         likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
         sampler = EmceeSampler(likelihood, chains=8, nwalkers=40, seed=42, save_fn=chain_fn)
-        sampler.run(check={'max_eigen_gr': 0.02})
+        sampler.run(check={'max_eigen_gr': 0.03})
                     
     if 'importance' in args.todo:
         from desilike.samplers import ImportanceSampler
         from desilike.samples import Chain
         
-        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
+        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if args.observable=='power' else ''))
 
         likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
         chain = Chain.concatenate([Chain.load(chain_fn.format(i)).remove_burnin(0.5)[::10] for i in range(8)])
         chain.aweight[...] *= np.exp(chain.logposterior.max() - chain.logposterior)
 
-        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_importance_{}{}_{}cov{}{}{}{}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag))
+        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_importance_{}{}_{}cov{}{}{}{}{}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, cutflag, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if args.observable=='power' else ''))
 
         sampler = ImportanceSampler(likelihood, chain, save_fn=chain_fn)
         sampler.run()
