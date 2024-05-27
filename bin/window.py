@@ -361,8 +361,8 @@ def get_data(source='desi', catalog='second', version='v3', tracer='ELG', region
     zmax = zrange[1]
     
     if source == 'desi':
-        wm_fn = DESIFileName().set_default_config(version=version, ftype='wmatrix_smooth', tracer=tracer, region=region, completeness=completeness, realization='merged', rpcut=rpcut, thetacut=thetacut, baseline=False, weighting='_default_FKP_lin', nran=18, cellsize=6, boxsize=9000)
-        pk_fn = DESIFileName().set_default_config(version=version, ftype='pkpoles', tracer=tracer, region=region, completeness=completeness, rpcut=rpcut, thetacut=thetacut, baseline=False, weighting='_default_FKP_lin', nran=18, cellsize=6, boxsize=9000)
+        wm_fn = DESIFileName().set_default_config(version=version, ftype='wmatrix_smooth', tracer=tracer, region=region, completeness=completeness, realization='merged', rpcut=rpcut, thetacut=thetacut, baseline=True)
+        pk_fn = DESIFileName().set_default_config(version=version, ftype='pkpoles', tracer=tracer, region=region, completeness=completeness, rpcut=rpcut, thetacut=thetacut, baseline=True)
 
     elif source == 'local':
         wm_fn = LocalFileName().set_default_config(mockgen=catalog, ftype='wmatrix_smooth', tracer=tracer, region=region, completeness=completeness, realization=0 if catalog=='first' else None, rpcut=rpcut, thetacut=thetacut, directedges=(bool(rpcut) or bool(thetacut)))
@@ -388,7 +388,8 @@ def get_data(source='desi', catalog='second', version='v3', tracer='ELG', region
     pk.select(kolim).slice(slice(0, len(pk.k) // korebin * korebin, korebin))
     
     # Covariance matrix
-    cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/{}cov_gaussian_pre_{}_{}_{:.1f}_{:.1f}_default_FKP_lin.txt'.format('noisy_' if 'noisy' in covtype else '', tracer, region, zmin, zmax)
+    #cov_fn = '/global/cfs/cdirs/desi/users/mpinon/Y1/cov/pk/{}cov_gaussian_pre_{}_{}_{:.1f}_{:.1f}_default_FKP_lin.txt'.format('noisy_' if 'noisy' in covtype else '', tracer, region, zmin, zmax)
+    cov_fn = '/global/cfs/cdirs/desi/users/oalves/thecovs/y1_blinded/pre/v1.2/cov_gaussian_{}_{}_{:.1f}-{:.1f}.txt'.format(tracer, region, zmin, zmax)
     cov = np.loadtxt(cov_fn)
     cov = truncate_cov(cov, kinit=np.arange(0., 0.4, 0.005), kfinal=np.arange(kolim[0], kolim[1], 0.005))
     
@@ -410,7 +411,7 @@ if __name__ == '__main__':
     
     source = 'desi' # desi or local
     catalog = 'second' # first, second, or data
-    version = 'v4_1'
+    version = 'v4_1fixran'
 
     tracer = "ELG_LOPnotqso"
     region = "GCcomb"
@@ -439,7 +440,7 @@ if __name__ == '__main__':
     mmatrix, state = window_rotation.fit(Minit='momt' if thetacut else None, max_sigma_W=max_sigma_W, max_sigma_R=max_sigma_R, factor_diff_ell=factor_diff_ell, csub=csub)
     
     output_dir = "/global/cfs/cdirs/desi/users/mpinon/secondGenMocksY1/{}/rotated_window".format(version)        
-    output_fn = LocalFileName().set_default_config(ftype='rotated_all_test', tracer=tracer, region=region, 
+    output_fn = LocalFileName().set_default_config(ftype='rotated_all', tracer=tracer, region=region, 
                                                    completeness=completeness, realization=None, weighting=None, 
                                                    thetacut=thetacut)
     
