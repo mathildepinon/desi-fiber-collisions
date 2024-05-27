@@ -275,8 +275,11 @@ def get_fit_data(observable_name='power', source='desi', catalog='second', versi
                 #masko_flat = np.concatenate((masko, )*len(ells))
                 #maskt = (rotatedwm.kin[0] >= xinlim[0]) & (rotatedwm.kin[0] < xinlim[1])            
                 #maskt_flat = np.concatenate((maskt, )*len(ells))
- 
-                power = load_poles_list([data_fn.get_path(realization=i).format(i) for i in range(25)], xlim={ell: (0., 0.4, 0.005) for ell in ells})
+                
+                if imock is None:
+                    power = load_poles_list([data_fn.get_path(realization=i) for i in range(25)], xlim={ell: (0., 0.4, 0.005) for ell in ells})
+                else:
+                    power = load_poles_list([data_fn.get_path(realization=imock)], xlim={ell: (0., 0.4, 0.005) for ell in ells})
                 data = power['data'].flatten()
                 x = power['k']
                 shotnoise = np.zeros_like(power['data'])
@@ -420,6 +423,7 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
     if observable_name == 'power':
         if not sculpt_window:
             if withshotnoise:
+                print('Shot noise included in the observable.')
                 observable = TracerPowerSpectrumMultipolesObservable(klim=xlim,
                                                                      #kin=np.arange(0.001, 0.35, 0.001),
                                                                      data=data,
@@ -427,6 +431,7 @@ def get_observable_likelihood(observable_name='power', theory_name='velocileptor
                                                                      theory=theory,
                                                                      systematic_templates=systematic_templates)
             else:
+                print('No shot noise included in the observable.')
                 observable = TracerPowerSpectrumMultipolesObservable(klim=xlim,
                                                                      #kin=np.arange(0.001, 0.35, 0.001),
                                                                      data=data,
@@ -521,7 +526,7 @@ if __name__ == '__main__':
     parser.add_argument('--fixed_sn', type=bool, required=False, default=False)
     parser.add_argument('--systematic_priors', type=float, required=False, default=None)
     parser.add_argument('--ktmax', type=float, required=False, default=0.35)
-    parser.add_argument('--shotnoise', type=bool, required=False, default=True)
+    parser.add_argument('--shotnoise', type=int, required=False, default=1)
     args = parser.parse_args()
     
     ktlim = (0.001, args.ktmax)
@@ -574,7 +579,7 @@ if __name__ == '__main__':
         from desilike.samplers import ImportanceSampler
         from desilike.samples import Chain
         
-        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, '_sculptwindow' if args.sculpt_window else '', '_priors{}'.format(args.systematic_priors) if args.systematic_priors is not None else '', ktmax_flag, '_withshotnoise' if (args.observable=='power' and args.shotnoise) else ''))
+        chain_fn = os.path.join(chains_dir, 'physicalpriorbasis', '{}_{}{}_{}cov{}{}_{{:d}}.npy'.format(args.observable, 'mock{}_'.format(args.imock) if args.imock is not None else '', args.theory_name, args.covtype, ktmax_flag, '_withshotnoise' if (args.observable=='power' and args.shotnoise) else ''))
 
         likelihood = get_observable_likelihood(observable_name=args.observable, source=args.source, catalog=args.catalog, version=args.version, tracer=args.tracer, region=args.region, z=args.z, zrange=(args.zmin, args.zmax), completeness=args.completeness, xinlim=ktlim, theory_name=args.theory_name, template_name=template_name, rpcut=args.rpcut, thetacut=args.thetacut, direct=args.direct, imock=args.imock, covtype=args.covtype, sculpt_window=args.sculpt_window, systematic_priors=args.systematic_priors, withshotnoise=args.shotnoise, emulator_fn=emulator_fn, footprint_fn=footprint_fn)
         chain = Chain.concatenate([Chain.load(chain_fn.format(i)).remove_burnin(0.5)[::10] for i in range(8)])
