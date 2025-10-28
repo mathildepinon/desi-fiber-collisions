@@ -51,7 +51,7 @@ class WindowRotation(BaseClass):
 
     def set_covmatrix(self, covmatrix, **kwargs):
         self.covmatrix = np.array(covmatrix)
-
+        
     def fit(self, Minit='momt', Mtarg=None, max_sigma_W=1000, max_sigma_R=1000, factor_diff_ell=100, csub=False, state=None):
         """Fit."""
         import jax
@@ -130,7 +130,7 @@ class WindowRotation(BaseClass):
             loss_M = 10 * jnp.sum((jnp.sum(mmatrix, axis=1) - 1.)**2)
             #print(loss_W, loss_C, weights_wmatrix.sum(), weights_covmatrix.sum(), weights_wmatrix.shape, weights_covmatrix.shape)
             return loss_W + loss_C + loss_M
-
+        
         def fit(theta, loss, init_learning_rate=0.00001, meta_learning_rate=0.0001, nsteps=100000, state=None, meta_state=None):
 
             self.log_info(f'Will do {nsteps} steps')
@@ -220,7 +220,7 @@ class WindowRotation(BaseClass):
             return Wp, Cp, Pp
         return Wp, Cp
 
-    def plot_wmatrix(self, mmatrix=None, k=0.1, ells=None, refwmatrix=None, semilogy=True, fn=None):
+    def plot_wmatrix(self, mmatrix=None, k=0.1, ells=None, refwmatrix=None, fn=None):
         if mmatrix is None: mmatrix = self.mmatrix
         k = np.ravel(k)
         if ells is None: ells = sorted(self.kout.keys())
@@ -237,9 +237,10 @@ class WindowRotation(BaseClass):
                     # Indices in approximate window matrix
                     norm = self.kin[ellin]
                     if refwmatrix is not None:
-                        ax.semilogy(self.kin[ellin], np.abs(refwmatrix[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])][indexout, :] / norm), alpha=alphas[ik], color='C0', ls=':', label=r'$W$' if ik == 0 else '')
-                    ax.semilogy(self.kin[ellin], np.abs(self.wmatrix.value.T[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])][indexout, :] / norm), alpha=alphas[ik], color='C0', label=r'$W^{\mathrm{cut}}$' if ik == 0 else '')
-                    ax.semilogy(self.kin[ellin], np.abs(wmatrix_rotated[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])][indexout, :] / norm), alpha=alphas[ik], color='C1', label=r'$W^{\mathrm{cut}\prime}$' if ik == 0 else '')                       
+                        ax.semilogy(self.kin[ellin], np.abs(refwmatrix[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])][indexout, :] / norm), alpha=alphas[ik], color='C0', ls=':', label=r'$\mathcal{W}$' if ik == 0 else '')
+                    ax.semilogy(self.kin[ellin], np.abs(self.wmatrix.value.T[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])][indexout, :] / norm), alpha=alphas[ik], color='C0', label=r'$\mathcal{W}^{\mathrm{cut}}$' if ik == 0 else '')
+                    ax.semilogy(self.kin[ellin], np.abs(wmatrix_rotated[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])][indexout, :] / norm), alpha=alphas[ik], color='C1', label=r'$\mathcal{W}^{\mathrm{cut}\prime}$' if ik == 0 else '') 
+                    ax.axvline(k, color='grey', lw=1, zorder=0, ls='--')
                 #ax.set_title(r'$\ell_{{\mathrm{{t}}}} = {:d} \times \ell_{{\mathrm{{o}}}} = {:d}$'.format(ellin, ellout))
                 text = r'$\ell_{{\mathrm{{t}}}} = {:d} \times \ell_{{\mathrm{{o}}}} = {:d}$'.format(ellin, ellout)
                 xlim = ax.get_xlim()
@@ -252,24 +253,71 @@ class WindowRotation(BaseClass):
         fig.subplots_adjust(wspace=0.1, hspace=0.12)
         if fn is not None:
             utils.savefig(fn, fig=fig, dpi=300)
+            
 
+    def plot_corrmatrix(self, mmatrix=None, k=0.1, ells=None, refmatrix=None, fn=None):
+        from cov_utils import cov_to_corrcoef
+
+        if mmatrix is None: mmatrix = self.mmatrix
+        k = np.ravel(k)
+        if ells is None: ells = sorted(self.kout.keys())
+
+        covmatrix_rotated = self.rotate(mmatrix=mmatrix)[1]
+        alphas = np.linspace(1, 0.2, len(k))
+        fig, lax = plt.subplots(len(ells), len(ells), sharex=True, sharey=True, figsize=(6, 5))
+
+        for iin, ellin in enumerate(ells):
+            for iout, ellout in enumerate(ells):
+                ax = lax[iout][iin]
+                for ik, kk in enumerate(k):
+                    indexout = np.abs(self.kout[ellout] - kk).argmin()
+                    if refmatrix is not None:
+                        ax.semilogy(self.kout[ellin], cov_to_corrcoef(refmatrix)[np.ix_(self.mask_ellsout[ellout], self.mask_ellsout[ellin])][indexout, :], alpha=alphas[ik], color='C0', ls=':', label=r'$R$' if ik == 0 else '')
+                    ax.semilogy(self.kout[ellin], cov_to_corrcoef(self.covmatrix)[np.ix_(self.mask_ellsout[ellout], self.mask_ellsout[ellin])][indexout, :], alpha=alphas[ik], color='C0', label=r'$R^{\mathrm{cut}}$' if ik == 0 else '')
+                    ax.semilogy(self.kout[ellin], cov_to_corrcoef(covmatrix_rotated)[np.ix_(self.mask_ellsout[ellout], self.mask_ellsout[ellin])][indexout, :], alpha=alphas[ik], color='C1', label=r'$R^{\mathrm{cut}\prime}$' if ik == 0 else '')                       
+                text = r'$\ell = {:d} \times \ell^{{\prime}} = {:d}$'.format(ellin, ellout)
+                xlim = ax.get_xlim()
+                ax.text((xlim[0]+xlim[1])/2., 3., text, horizontalalignment='center', verticalalignment='top', color='black', fontsize=12)
+                ax.set_ylim((1e-2, 5)) 
+                if iout == len(ells) - 1: ax.set_xlabel(r'$k$ [$h/\mathrm{Mpc}$]')
+                if iin == iout == 2: lax[iout][iin].legend(loc='lower right')
+        
+        fig.tight_layout()
+        fig.subplots_adjust(wspace=0.1, hspace=0.12)
+        if fn is not None:
+            utils.savefig(fn, fig=fig, dpi=300)
+
+            
     def plot_compactness(self, frac=0.95, ells=None, klim=(0.02, 0.2), refwmatrix=None, fn=None):
         if ells is None:
             ells = sorted(self.kout.keys())
             
         wmatrix_rotated = self.rotate()[0]
         fig, ax = plt.subplots(1, 1, figsize=(4, 3), squeeze=True)
-
+        
         def compactness(wm, ells, frac):
             weights_bf = sum(np.cumsum(np.abs(wm[np.ix_(self.mask_ellsout[ellout], self.mask_ellsin[ellin])]), axis=-1) for ellin in ells for ellout in ells)
             weights_tot = weights_bf[:, -1]
             iktmax = np.argmax(weights_bf / weights_tot[:, None] >= frac, axis=-1)
             return self.kin[0][iktmax]
 
+        #for zenodo
+        data = dict()   
+        data.update({'k_o': self.kout[0]})
+
         if refwmatrix is not None:
             ax.plot(self.kout[0], compactness(refwmatrix, ells=ells, frac=frac), color='C0', ls=':', label=r'$W$')
+            data.update({'compactness_w': compactness(refwmatrix, ells=ells, frac=frac)})
         ax.plot(self.kout[0], compactness(self.wmatrix.value.T, ells=ells, frac=frac), color='C0', label=r'$W^{\mathrm{cut}}$')
+        data.update({'compactness_w_thetacut': compactness(self.wmatrix.value.T, ells=ells, frac=frac)})
         ax.plot(self.kout[0], compactness(wmatrix_rotated, ells=ells, frac=frac), color='C1', label=r'$W^{\mathrm{cut}\prime}$')
+        data.update({'compactness_w_thetacut_rotated': compactness(wmatrix_rotated, ells=ells, frac=frac)})  
+        
+        # for zenodo
+        import pandas as pd
+        data_df = pd.DataFrame(data)
+        path = os.path.join(os.path.abspath('/global/u2/m/mpinon/fiber_collisions/zenodo/figure14'), 'figure14_compactness.txt')
+        data_df.to_csv(path)
 
         for kk in (klim or []): ax.axvline(kk, ls='--', color='k', alpha=0.5)
 
@@ -282,21 +330,38 @@ class WindowRotation(BaseClass):
         if fn is not None:
             utils.savefig(fn, fig=fig, dpi=300)
 
-    def plot_rotated(self, obs, ells=None, klim=(0.02, 0.2), fn=None):
+    def plot_rotated(self, obs, ells=None, klim=(0.02, 0.2), refobs=None, fn=None):
 
         if ells is None:
             ells = sorted(self.kout.keys())
 
         obs_rotated = self.rotate(obs=obs)[2]
         fig, lax = plt.subplots(1, len(ells), figsize=(8, 2.5), sharey=False)
-
+        
+        #for zenodo
+        data = {0: dict(), 2: dict(), 4: dict()} 
+        
         for ill, ell in enumerate(ells):
             ax = lax[ill]
+            data[ell].update({'k_o': self.kout[ell]})
+            if refobs is not None:
+                m = np.array([-4.491e+02, 1.460e+01, -4.713e+00])
+                mo = np.array(self.mmatrix[1])
+                mmo = (m.dot(mo)).reshape(refobs['data'].shape)
+                ax.plot(refobs['k'][ill], refobs['k'][ill] * refobs['data'][ill], color='C0', ls=':', label=r'$P_{\mathrm{t}}(k)$') 
+                data[ell].update({'pk_t': refobs['data'][ill], 'fitted_smo': mmo[ill]})
             ax.plot(self.kout[ell], self.kout[ell] * obs[self.mask_ellsout[ell]], color='C0', label=r'$P(k)$')
-            ax.plot(self.kout[ell], self.kout[ell] * obs_rotated[self.mask_ellsout[ell]], color='C1', label=r'$P^{\prime}(k)$')
+            ax.plot(self.kout[ell], self.kout[ell] * (obs_rotated[self.mask_ellsout[ell]] - (mmo[ill] if refobs else 0)), color='C1', label=r'$P^{\prime}(k)$')
             ax.set_title(r'$\ell = {}$'.format(ell))
             ax.set_xlabel(r'$k$ [$h/\mathrm{Mpc}$]')
             ax.set_xlim(klim)
+            data[ell].update({'pk': obs[self.mask_ellsout[ell]], 'pk_rotated': obs_rotated[self.mask_ellsout[ell]]})
+
+            # for zenodo
+            import pandas as pd
+            data_df = pd.DataFrame(data[ell])
+            path = os.path.join(os.path.abspath('/global/u2/m/mpinon/fiber_collisions/zenodo/figure15'), 'figure15_ell{}_datapoints.txt'.format(ell))
+            data_df.to_csv(path)
 
         lax[0].set_ylabel(r'$k P_{\ell}(k)$ [$(\mathrm{Mpc}/h)^{2}$]')
         lax[0].legend()
@@ -304,7 +369,29 @@ class WindowRotation(BaseClass):
         fig.subplots_adjust(wspace=0.2)
         if fn is not None:
             utils.savefig(fn, fig=fig, dpi=300)
+            
+    def plot_mo(self, ells=None, klim=(0.02, 0.2), fn=None):
+        if ells is None:
+            ells = sorted(self.kout.keys())
 
+        mo = np.array(self.mmatrix[1])
+        
+        fig, lax = plt.subplots(1, len(ells), figsize=(8, 2.5), sharey=False)
+        
+        for ill, ell in enumerate(ells):
+            ax = lax[ill]
+            ax.plot(self.kout[ell], self.kout[ell] * mo[ill][self.mask_ellsout[ell]], color='C0', label=r'$\mathbf{m}_{\mathrm{o}}$')
+            ax.set_title(r'$\ell = {}$'.format(ell))
+            ax.set_xlabel(r'$k$ [$h/\mathrm{Mpc}$]')
+            ax.set_xlim(klim)
+            ax.set_ylim(-0.1, 1.1)
+
+        lax[0].set_ylabel(r'$\mathbf{m}_{\mathrm{o}}$')
+        fig.tight_layout()
+        fig.subplots_adjust(wspace=0.2)
+        if fn is not None:
+            utils.savefig(fn, fig=fig, dpi=300)
+            
     def plot_validation(self, obs, theory, ells=None, klim=(0.02, 0.2), fn=None):
 
         if ells is None:
@@ -322,11 +409,11 @@ class WindowRotation(BaseClass):
 
         for ill, ell in enumerate(ells):
             color = 'C{}'.format(ill)
-            lax[0][ill].errorbar(self.kout[ell], self.kout[ell] * Pp[self.mask_ellsout[ell]], self.kout[ell] * std[self.mask_ellsout[ell]], color=color, marker='.', ls='', label=r'$P^{\prime}(k)$')
+            lax[0][ill].errorbar(self.kout[ell], self.kout[ell] * Pp[self.mask_ellsout[ell]], self.kout[ell] * std[self.mask_ellsout[ell]] / 5, color=color, marker='.', ls='', label=r'$P^{\prime}(k)$')
             lax[0][ill].plot(self.kout[ell], self.kout[ell] * Ptp[self.mask_ellsout[ell]], color=color, label=r'$W^{\prime}(k, k^{\prime}) P(k^{\prime})$')
             lax[0][ill].set_title(r'$\ell = {}$'.format(ell))
 
-            lax[1][ill].plot(self.kout[ell], (Ptp[self.mask_ellsout[ell]] - Pp[self.mask_ellsout[ell]]) / std[self.mask_ellsout[ell]], color=color)
+            lax[1][ill].plot(self.kout[ell], (Ptp[self.mask_ellsout[ell]] - Pp[self.mask_ellsout[ell]]) / std[self.mask_ellsout[ell]] * 5, color=color)
             lax[1][ill].set_xlabel(r'$k$ [$h/\mathrm{Mpc}$]')
             lax[0][ill].set_xlim(klim)
             lax[1][ill].set_ylim(-2., 2.)

@@ -58,7 +58,7 @@ def get_dd_data(data_dir, tracer, region, zrange=None, sample=None, return_rr=Fa
             
     return theta, counts
 
-rr = True
+rr = False
 
 for i, tracer in enumerate(['ELG_LOPnotqso', 'LRG', 'QSO']):
     fig, axes = plt.subplots(1, 2, figsize=(6, 3), sharey=True)

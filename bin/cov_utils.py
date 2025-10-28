@@ -123,7 +123,7 @@ def plot_corrcoef(cov, ells, k, norm=None):
     for i in range(nells):
         for j in range(nells):
             ax = lax[nells-1-i][j]
-            mesh = ax.pcolor(k, k, corrcoef[i*nk:(i+1)*nk,j*nk:(j+1)*nk].T, norm=None, cmap=plt.get_cmap('RdBu'))
+            mesh = ax.pcolor(k, k, corrcoef[i*nk:(i+1)*nk,j*nk:(j+1)*nk].T, norm=norm, cmap=plt.get_cmap('RdBu'))
             if i>0: ax.xaxis.set_visible(False)
             else: ax.set_xlabel(r'$k$  [$h$/Mpc]')
             if j>0: ax.yaxis.set_visible(False)
@@ -135,7 +135,7 @@ def plot_corrcoef(cov, ells, k, norm=None):
         
     fig.subplots_adjust(left=0.15, right=0.85, bottom=0.15)
     cbar_ax = fig.add_axes([0.875, 0.15, 0.02, 0.8])
-    cbar = fig.colorbar(mesh, cax=cbar_ax)
-    cbar.set_label(r'$r$', rotation=0)
+    cbar = fig.colorbar(mesh, cax=cbar_ax, norm=norm)
+    #cbar.set_label(r'$r$', rotation=0)
     plt.subplots_adjust(wspace=0.1, hspace=0.1)
     return lax
